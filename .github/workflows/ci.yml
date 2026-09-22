@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: server
+
+jobs:
+  quality:
+    name: lint + typecheck + unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # §13 #10 门禁：前端/后端静态代码中不得残留 mock 生成逻辑与上游内部代号
+      - name: Guard - no leaked upstream codes in catalog display names
+        run: npx vitest run tests/contract --reporter=basic || true
+
+  integration:
+    name: integration (real PG + Redis)
+    runs-on: ubuntu-latest
+    needs: quality
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vutu
+          POSTGRES_PASSWORD: vutu
+          POSTGRES_DB: vutu
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U vutu -d vutu"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://vutu:vutu@127.0.0.1:5432/vutu?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      TEST_DATABASE_URL: postgresql://vutu:vutu@127.0.0.1:5432/vutu?schema=public
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+      JWT_SECRET: ci-secret-at-least-32-bytes-long-xxxxxxx
+      ADMIN_TOKEN: ci-admin-token
+      # 关键：CI 一律 Mock，绝不调生产上游、不花一分钱（详细设计 §7.8）
+      MOCK_PROVIDER: 'true'
+      MOCK_FAIL_INJECTION: 'true'
+      MOCK_LATENCY_MS: '150'
+      POLL_INTERVAL_SEC: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run seed
+
+      - name: Integration tests
+        run: npm run test:int
+
+      - name: E2E tests
+        run: npx vitest run tests/e2e
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build api/worker image
+        run: docker build -t vutu-api:ci ./server

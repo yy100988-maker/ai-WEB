@@ -1,0 +1,20 @@
+[
+  {
+    "id": "bc15bd47-25de-4762-b9fc-152e1039a73a",
+    "displayName": "GPT Image 2.5",
+    "code": "tt-image-2.5",
+    "capabilities": [
+      "text_to_image",
+      "image_to_image"
+    ]
+  },
+  {
+    "id": "6039c42a-d1e6-4a72-a3d8-4bd1dbe30617",
+    "displayName": "GPT Image 2",
+    "code": "tt-image-2",
+    "capabilities": [
+      "text_to_image",
+      "image_to_image"
+    ]
+  }
+]

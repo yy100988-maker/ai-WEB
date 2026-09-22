@@ -1,0 +1,640 @@
+// Vutu 后端数据模型 —— 严格对应详细设计 v0.4 §1
+// 约定：DB 存 timestamptz(UTC)；积分 INTEGER；上游算力 NUMERIC(18,6)；
+//      主键 UUID，对外另发 public_id（usr_/tsk_/ast_/ord_/chk_）。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- m0: 枚举 ----------
+
+enum TaskStatus {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+  timeout
+}
+
+enum LedgerType {
+  grant_signup
+  grant_checkin
+  purchase
+  task_deduct
+  task_refund
+  refund
+  admin_adjust
+  promo
+  expire
+}
+
+enum BillingMethod {
+  per_call
+  per_token
+  per_second
+}
+
+enum PlanCode {
+  free
+  pro
+  enterprise
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  cancelled
+  expired
+}
+
+enum AssetKind {
+  upload
+  output
+}
+
+enum NotificationType {
+  task_completed
+  task_failed
+  subscription_expiry
+  promo
+}
+
+// ---------- 1.1 用户与认证 ----------
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicId     String    @unique @map("public_id")
+  email        String?   @unique
+  phone        String?   @unique
+  passwordHash String?   @map("password_hash")
+  locale       String    @default("zh-CN")
+  planId       String    @map("plan_id") @db.Uuid
+  plan         Plan      @relation(fields: [planId], references: [id])
+  status       String    @default("active") // active | suspended | deleted
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
+
+  profile       UserProfile?
+  oauthAccounts OAuthAccount[]
+  refreshTokens RefreshToken[]
+  tasks         Task[]
+  assets        Asset[]
+  ledgerEntries CreditLedger[]
+  checkins      DailyCheckin[]
+  notifications UserNotification[]
+  preferences   UserPreference?
+
+  @@map("users")
+}
+
+model UserProfile {
+  userId        String  @id @map("user_id") @db.Uuid
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName   String? @map("display_name") @db.VarChar(50)
+  avatarAssetId String? @map("avatar_asset_id") @db.Uuid
+
+  @@map("user_profiles")
+}
+
+model OAuthAccount {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String @map("user_id") @db.Uuid
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   String @db.VarChar(20)
+  providerId String @map("provider_id")
+
+  @@unique([provider, providerId])
+  @@map("oauth_accounts")
+}
+
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------- 1.2 订阅计划 ----------
+
+model Plan {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code           PlanCode @unique
+  nameI18n       Json     @map("name_i18n")
+  listPriceUsd   Int      @map("list_price_usd") // cent
+  monthlyCredits Int      @map("monthly_credits")
+  checkinCredits Int      @map("checkin_credits")
+  maxConcurrency Int      @map("max_concurrency")
+  planDiscount   Decimal? @map("plan_discount") @db.Decimal(4, 3)
+  features       Json
+  active         Boolean  @default(true)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  users         User[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String             @map("user_id") @db.Uuid
+  planId             String             @map("plan_id") @db.Uuid
+  plan               Plan               @relation(fields: [planId], references: [id])
+  status             SubscriptionStatus
+  currentPeriodStart DateTime           @map("current_period_start") @db.Timestamptz
+  currentPeriodEnd   DateTime           @map("current_period_end") @db.Timestamptz
+  externalRef        String?            @map("external_ref")
+  cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([userId, status])
+  @@map("subscriptions")
+}
+
+// ---------- 1.3 渠道 / 模型 ----------
+
+model Channel {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code         String   @unique
+  name         String
+  baseUrl      String   @map("base_url")
+  enabled      Boolean  @default(true)
+  rateLimitRpm Int      @default(120) @map("rate_limit_rpm")
+  timeoutMs    Int      @default(30000) @map("timeout_ms")
+  healthStatus String   @default("unknown") @map("health_status")
+  circuitState String   @default("closed") @map("circuit_state")
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  apiKeys ChannelApiKey[]
+  models  Model[]
+  tasks   Task[]
+  costs   TaskCost[]
+
+  @@map("channels")
+}
+
+model ChannelApiKey {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  channelId  String   @map("channel_id") @db.Uuid
+  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  keyRef     String   @map("key_ref") // 环境变量引用名，DB 不存明文
+  strategy   String   @default("价格优先")
+  priority   Int      @default(1)
+  enabled    Boolean  @default(true)
+  quotaLimit Decimal? @map("quota_limit") @db.Decimal(18, 6)
+  quotaUsed  Decimal  @default(0) @map("quota_used") @db.Decimal(18, 6)
+
+  @@map("channel_api_keys")
+}
+
+model Model {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  channelId      String   @map("channel_id") @db.Uuid
+  channel        Channel  @relation(fields: [channelId], references: [id])
+  code           String
+  displayName    String   @map("display_name")
+  capabilities   String[]
+  paramMapping   Json     @map("param_mapping")
+  requiredParams Json     @map("required_params")
+  constraints    Json
+  enabled        Boolean  @default(true)
+  qualityScore   Int?     @map("quality_score")
+  active         Boolean  @default(false)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  priceItems       PriceItem[]
+  pricingSnapshots ModelPricingSnapshot[]
+  syncLogs         PriceSyncLog[]
+  tasks            Task[]
+  costs            TaskCost[]
+
+  @@unique([channelId, code])
+  @@index([enabled, active])
+  @@map("models")
+}
+
+// ---------- 1.4 资产 ----------
+
+model Asset {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicId    String    @unique @map("public_id")
+  userId      String    @map("user_id") @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        AssetKind
+  mimeType    String    @map("mime_type")
+  storageKey  String    @unique @map("storage_key")
+  sizeBytes   BigInt    @map("size_bytes")
+  width       Int?
+  height      Int?
+  durationSec Int?      @map("duration_sec")
+  checksum    String?
+  sourceUrl   String?   @map("source_url")
+  meta        Json      @default("{}")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@index([userId, kind, createdAt(sort: Desc)])
+  @@map("assets")
+}
+
+// ---------- 1.5 任务 ----------
+
+model Task {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicId        String     @unique @map("public_id")
+  userId          String     @map("user_id") @db.Uuid
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  capability      String
+  modelId         String     @map("model_id") @db.Uuid
+  model           Model      @relation(fields: [modelId], references: [id])
+  channelId       String     @map("channel_id") @db.Uuid
+  channel         Channel    @relation(fields: [channelId], references: [id])
+  apiKeyId        String?    @map("api_key_id") @db.Uuid
+  status          TaskStatus @default(queued)
+  progress        Int        @default(0)
+  prompt          String     @default("")
+  negativePrompt  String?    @map("negative_prompt")
+  params          Json
+  inputAssetIds   String[]   @map("input_asset_ids") @db.Uuid
+  externalJobId   String?    @map("external_job_id")
+  externalStatus  Json?      @map("external_status")
+  resultAssetIds  String[]   @map("result_asset_ids") @db.Uuid
+  error           Json?
+  priceSnapshot   Json       @map("price_snapshot")
+  quotedCredits   Int        @map("quoted_credits")
+  deductedCredits Int        @map("deducted_credits")
+  settledCredits  Int        @default(0) @map("settled_credits")
+  refunded        Boolean    @default(false)
+  attempts        Int        @default(0)
+  idempotencyKey  String     @map("idempotency_key")
+  priority        Int        @default(0)
+  queuedAt        DateTime   @default(now()) @map("queued_at") @db.Timestamptz
+  startedAt       DateTime?  @map("started_at") @db.Timestamptz
+  finishedAt      DateTime?  @map("finished_at") @db.Timestamptz
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  events TaskEvent[]
+  costs  TaskCost[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([externalJobId])
+  @@index([status, queuedAt])
+  @@map("tasks")
+}
+
+model TaskEvent {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId     String      @map("task_id") @db.Uuid
+  task       Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromStatus TaskStatus? @map("from_status")
+  toStatus   TaskStatus? @map("to_status")
+  progress   Int         @default(0)
+  message    String?
+  payload    Json        @default("{}")
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([taskId, createdAt])
+  @@map("task_events")
+}
+
+model TaskCost {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId           String        @unique @map("task_id") @db.Uuid
+  task             Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  channelId        String        @map("channel_id") @db.Uuid
+  channel          Channel       @relation(fields: [channelId], references: [id])
+  modelId          String        @map("model_id") @db.Uuid
+  model            Model         @relation(fields: [modelId], references: [id])
+  billingMethod    BillingMethod @map("billing_method")
+  costUnits        Decimal       @map("cost_units") @db.Decimal(18, 6)
+  channelGroup     String?       @map("channel_group")
+  platformRefunded Boolean       @default(false) @map("platform_refunded")
+  refundedAmount   Decimal       @default(0) @map("refunded_amount") @db.Decimal(18, 6)
+  durationSeconds  Int?          @map("duration_seconds")
+  rawUsage         Json          @default("{}") @map("raw_usage")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("task_costs")
+}
+
+// ---------- 1.6 账本 / 赠送 / 订单 ----------
+
+model CreditLedger {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta          Int
+  type           LedgerType
+  taskId         String?    @map("task_id") @db.Uuid
+  orderId        String?    @map("order_id") @db.Uuid
+  balanceAfter   Int        @map("balance_after")
+  idempotencyKey String     @map("idempotency_key")
+  expiresAt      DateTime?  @map("expires_at") @db.Timestamptz
+  note           String?
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([taskId])
+  @@index([userId, expiresAt])
+  @@map("credit_ledger")
+}
+
+model DailyCheckin {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  credits   Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([userId, date])
+  @@map("daily_checkins")
+}
+
+model DailyBalanceReset {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  date        DateTime @db.Date
+  resetAmount Int      @map("reset_amount")
+
+  @@unique([userId, date])
+  @@map("daily_balance_reset")
+}
+
+model Grant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  type          String
+  amount        Int
+  lastGrantedAt DateTime  @map("last_granted_at") @db.Timestamptz
+  nextGrantAt   DateTime  @map("next_grant_at") @db.Timestamptz
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz
+
+  @@index([nextGrantAt])
+  @@map("grants")
+}
+
+model Order {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicId    String   @unique @map("public_id")
+  userId      String   @map("user_id") @db.Uuid
+  kind        String
+  amountCents Int      @map("amount_cents")
+  currency    String   @default("USD")
+  status      String   @default("pending")
+  externalRef String?  @map("external_ref")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("orders")
+}
+
+model WebhookEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source      String
+  externalId  String    @map("external_id")
+  payload     Json
+  processedAt DateTime? @map("processed_at") @db.Timestamptz
+  error       String?
+
+  @@unique([source, externalId])
+  @@map("webhook_events")
+}
+
+// ---------- 1.7 定价配置 ----------
+
+model PriceItem {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  modelId    String   @map("model_id") @db.Uuid
+  model      Model    @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  capability String
+  spec       Json
+  specHash   String   @map("spec_hash")
+  costUnits  Decimal  @map("cost_units") @db.Decimal(18, 6)
+  markup     Decimal  @default(1.3) @db.Decimal(4, 3)
+  credits    Int
+  active     Boolean  @default(false)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([modelId, capability, specHash])
+  @@index([capability, active])
+  @@map("price_items")
+}
+
+model PriceSyncLog {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  modelId      String   @map("model_id") @db.Uuid
+  model        Model    @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  oldCostUnits Decimal? @map("old_cost_units") @db.Decimal(18, 6)
+  newCostUnits Decimal? @map("new_cost_units") @db.Decimal(18, 6)
+  oldCredits   Int?     @map("old_credits")
+  newCredits   Int?     @map("new_credits")
+  triggeredAt  DateTime @default(now()) @map("triggered_at") @db.Timestamptz
+  status       String
+
+  @@index([triggeredAt])
+  @@map("price_sync_log")
+}
+
+model ModelPricingSnapshot {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  modelId            String        @map("model_id") @db.Uuid
+  model              Model         @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  groupName          String        @map("group_name")
+  isActive           Boolean       @map("is_active")
+  billingMethod      BillingMethod @map("billing_method")
+  basePrice          Decimal       @map("base_price") @db.Decimal(18, 6)
+  minPrice           Decimal       @map("min_price") @db.Decimal(18, 6)
+  inputTokenPrice    Decimal?      @map("input_token_price") @db.Decimal(18, 6)
+  outputTokenPrice   Decimal?      @map("output_token_price") @db.Decimal(18, 6)
+  optionPrices       Json          @map("option_prices")
+  timeDiscounts      Json?         @map("time_discounts")
+  successRate24h     Float?        @map("success_rate_24h")
+  avgResponseSeconds Float?        @map("avg_response_seconds")
+  capturedAt         DateTime      @default(now()) @map("captured_at") @db.Timestamptz
+
+  @@index([modelId, capturedAt(sort: Desc)])
+  @@map("model_pricing_snapshots")
+}
+
+model RoutingPolicy {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  capability      String   @unique
+  strategy        String
+  candidates      Json
+  fallbackEnabled Boolean  @default(true) @map("fallback_enabled")
+  circuitBreaker  Json     @map("circuit_breaker")
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("routing_policies")
+}
+
+model Promotion {
+  id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scope    String
+  targetId String?  @map("target_id")
+  discount Decimal  @db.Decimal(4, 3)
+  startsAt DateTime @map("starts_at") @db.Timestamptz
+  endsAt   DateTime @map("ends_at") @db.Timestamptz
+  nameI18n Json     @map("name_i18n")
+  active   Boolean  @default(true)
+
+  @@index([active, startsAt, endsAt])
+  @@map("promotions")
+}
+
+model UserCoupon {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  code      String
+  discount  Decimal   @db.Decimal(18, 2)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+
+  @@index([userId, usedAt])
+  @@map("user_coupons")
+}
+
+// ---------- 1.8 通知 / 偏好 / 审计 ----------
+
+model UserNotification {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  titleI18n Json             @map("title_i18n")
+  bodyI18n  Json             @map("body_i18n")
+  readAt    DateTime?        @map("read_at") @db.Timestamptz
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@map("user_notifications")
+}
+
+model UserPreference {
+  id                 String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String  @unique @map("user_id") @db.Uuid
+  user               User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  locale             String  @default("zh-CN")
+  timezone           String  @default("Asia/Shanghai")
+  emailNotifications Boolean @default(true) @map("email_notifications")
+
+  @@map("user_preferences")
+}
+
+model AdminAuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminKey  String   @map("admin_key")
+  action    String
+  target    Json
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([createdAt])
+  @@map("admin_audit_logs")
+}
+
+// ---------- 1.9 提示词库 ----------
+
+model PromptTab {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code      String  @unique
+  labelI18n Json    @map("label_i18n")
+  sort      Int     @default(0)
+  active    Boolean @default(true)
+
+  posts PromptPost[]
+
+  @@map("prompt_tabs")
+}
+
+model PromptPost {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tabCode   String    @map("tab_code")
+  tab       PromptTab @relation(fields: [tabCode], references: [code])
+  title     String
+  imgUrl    String    @map("img_url")
+  assetId   String?   @map("asset_id") @db.Uuid
+  views     Int       @default(0)
+  likes     Int       @default(0)
+  copies    Int       @default(0)
+  sort      Int       @default(0)
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  events PromptPostEvent[]
+
+  @@index([tabCode, active, sort])
+  @@map("prompt_posts")
+}
+
+model PromptPostEvent {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  postId    String     @map("post_id") @db.Uuid
+  post      PromptPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String     @map("user_id") @db.Uuid // 非空：匿名用哨兵 UUID
+  event     String
+  date      DateTime   @db.Date
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([postId, userId, event, date])
+  @@index([postId, date])
+  @@map("prompt_post_events")
+}
+
+// ---------- 1.10 Remix（Phase 2 表结构先行） ----------
+
+model RemixProject {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  sourceAssetId String?  @map("source_asset_id") @db.Uuid
+  sourceUrl     String?  @map("source_url")
+  status        String   @default("analyzing")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  scenes     RemixScene[]
+  globalRefs RemixGlobalRef[]
+
+  @@map("remix_projects")
+}
+
+model RemixScene {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId    String       @map("project_id") @db.Uuid
+  project      RemixProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  idx          Int
+  startSec     Int          @map("start_sec")
+  endSec       Int          @map("end_sec")
+  prompt       String
+  thumbAssetId String?      @map("thumb_asset_id") @db.Uuid
+  taskId       String?      @map("task_id") @db.Uuid
+  status       String       @default("pending")
+
+  @@unique([projectId, idx])
+  @@map("remix_scenes")
+}
+
+model RemixGlobalRef {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId String       @map("project_id") @db.Uuid
+  project   RemixProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assetId   String       @map("asset_id") @db.Uuid
+  kind      String
+
+  @@map("remix_global_refs")
+}

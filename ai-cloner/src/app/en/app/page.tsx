@@ -1,0 +1,11 @@
+import type { Metadata } from "next";
+import { AppHomePage } from "@/components/sites/vutu/AppHomePage";
+
+export const metadata: Metadata = {
+  title: "Vutu App Home",
+  robots: { index: false, follow: false },
+};
+
+export default function Page() {
+  return <AppHomePage locale="en" base="/en" />;
+}

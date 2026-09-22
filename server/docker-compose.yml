@@ -1,0 +1,210 @@
+# Vutu 后端独立栈（与前端 ai-cloner 同机部署）
+#
+# 拓扑：nginx (宿主机 443) → /api/ → 127.0.0.1:8080 → api 容器
+#       api / worker / postgres / redis / minio 均只绑定 127.0.0.1，不对公网暴露
+#
+# 用法：
+#   cp .env.example .env   # 填密钥
+#   docker compose up -d --build
+#   docker compose exec api npx prisma migrate deploy
+#   docker compose exec api npx tsx prisma/seed.ts
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vutu-api:latest
+    container_name: vutu-api
+    restart: unless-stopped
+    command: ["node", "dist/main.js"]
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 1g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vutu-api:latest
+    container_name: vutu-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    mem_limit: 2g
+    cpus: 2
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: vutu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vutu
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required}
+      POSTGRES_DB: vutu
+      # 同机内存有限，按小实例调优
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_connections=100
+      - -c
+      - work_mem=8MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backup:/backup
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vutu -d vutu"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: vutu-redis
+    restart: unless-stopped
+    # AOF 持久化 BullMQ 队列（详细设计 §3.1：stalled 任务不丢）
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  minio:
+    # 注意：Docker Hub 的 `minio/minio` 在部分网络/账号下会被拒绝（pull access denied），
+    # 官方镜像在 quay.io 亦可获取，故固定使用 quay.io。
+    image: quay.io/minio/minio:latest
+    container_name: vutu-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-vutuadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  # 一次性：集成 + E2E 测试（真 PG/Redis + MockProvider，零上游费用）
+  # 用 `docker compose run --rm test` 或 `./deploy/run-tests.sh` 调用。
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: vutu-api:test
+    container_name: vutu-test
+    profiles: ["test"] # 默认不随 up 启动
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: test
+      LOG_LEVEL: silent
+      MOCK_PROVIDER: "true"
+      MOCK_LATENCY_MS: "200"
+      MOCK_FAIL_INJECTION: "true"
+      # 集成/E2E 用假邮箱（e2e-xxx@example.com），必须抑制真实发信，
+      # 否则会被 Resend 拒投（422）→ 503，测试挂在与被测逻辑无关的外部依赖上
+      MAIL_SUPPRESS: "true"
+      POLL_INTERVAL_SEC: "1"
+      BCRYPT_ROUNDS: "4"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  # 一次性任务：建桶 + 设置私有策略（bucket 默认私有）
+  # 用 minio 镜像自带的 mc 二进制，避免额外拉取 minio/mc 镜像
+  minio-init:
+    image: quay.io/minio/minio:latest
+    container_name: vutu-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-vutuadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/${S3_BUCKET:-vutu} &&
+      mc anonymous set none local/${S3_BUCKET:-vutu} &&
+      echo 'minio bucket ready';
+      "
+    restart: "no"
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

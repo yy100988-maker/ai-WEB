@@ -1,0 +1,34 @@
+# 依赖与构建产物
+node_modules/
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# 本地调试脚本与审计产物（不进仓库）
+_*.py
+_*.txt
+_*.log
+_*.json
+__pycache__/
+*.pyc
+*.tar.gz
+
+# 密钥与环境
+.env*
+*.local
+*.pem
+*token*
+*creds*
+*secret*
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 备份文件
+*.bak
+*.bak-*
+*~
