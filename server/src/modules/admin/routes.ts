@@ -21,6 +21,7 @@ import { getConfig } from '../../core/config.js';
 import { ok, type RouteModule } from '../../core/http.js';
 import { childLogger } from '../../core/logger.js';
 import { findInternalCodenameLeaks } from '../catalog/service.js';
+import { reviewPost } from '../prompts/publish.js';
 
 const log = childLogger({ mod: 'admin' });
 
@@ -107,6 +108,78 @@ const activeBodySchema = z.object({
 
 export const adminRoutes: RouteModule = async (app: FastifyInstance) => {
   adminGuard(app);
+
+  // ============================ xiaoye-adoption F4：广场帖子审核（R1，方案 §6，决议 D3 兜底） ============================
+
+  const reviewBody = z.object({ reason: z.string().max(200).optional() });
+
+  /** 待审/在架列表（?status=pending|published|rejected|all，默认 pending） */
+  app.get('/v1/admin/prompt-posts', { preHandler: [app.requireAdmin] }, async (req) => {
+    const q = z
+      .object({
+        status: z.enum(['pending', 'published', 'rejected', 'all']).default('pending'),
+        limit: z.coerce.number().int().min(1).max(200).default(50),
+        cursor: z.string().optional(),
+      })
+      .parse(req.query);
+
+    const rows = await db().promptPost.findMany({
+      where: q.status === 'all' ? {} : { status: q.status },
+      orderBy: [{ createdAt: 'desc' }],
+      take: q.limit + 1,
+      ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
+    });
+    const hasMore = rows.length > q.limit;
+    const items = hasMore ? rows.slice(0, q.limit) : rows;
+    return ok(req, {
+      items: items.map((post) => ({
+        id: post.id,
+        tabCode: post.tabCode,
+        title: post.title,
+        imgUrl: post.imgUrl,
+        status: post.status,
+        createdBy: post.createdBy,
+        rejectReason: post.rejectReason,
+        active: post.active,
+        createdAt: post.createdAt.toISOString(),
+      })),
+      nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,
+    });
+  });
+
+  /** 审核通过：仅 pending → published（重复 approve 400），写审计 */
+  app.post('/v1/admin/prompt-posts/:id/approve', { preHandler: [app.requireAdmin] }, async (req) => {
+    const params = z.object({ id: z.string().uuid() }).parse(req.params);
+    const result = await reviewPost({ postId: params.id, action: 'approve' });
+    await recordAdminAudit({
+      adminKey: adminKeyFingerprint(verifyAdminToken(req)),
+      action: 'prompt_post.approve',
+      target: { postId: params.id, status: result.status },
+    });
+    return ok(req, result);
+  });
+
+  /**
+   * 驳回：pending → rejected；published → rejected **放行**（事后下架 —— D3 自动过审
+   * 必须保留的人工兜底能力），写审计。
+   */
+  app.post('/v1/admin/prompt-posts/:id/reject', { preHandler: [app.requireAdmin] }, async (req) => {
+    const params = z.object({ id: z.string().uuid() }).parse(req.params);
+    const body = reviewBody.parse(req.body ?? {});
+    const result = await reviewPost({
+      postId: params.id,
+      action: 'reject',
+      ...(body.reason !== undefined ? { rejectReason: body.reason } : {}),
+    });
+    await recordAdminAudit({
+      adminKey: adminKeyFingerprint(verifyAdminToken(req)),
+      action: 'prompt_post.reject',
+      target: { postId: params.id, status: result.status },
+      payload: { reason: body.reason ?? '' },
+    });
+    return ok(req, result);
+  });
+
 
   /**
    * 模型上下架（详细设计 §2.7：`POST /v1/admin/models/:id/active { active }`）。

@@ -65,6 +65,20 @@ export interface ExpireBatchInput extends LedgerTxContext {
 }
 
 /**
+ * R1 修订新增（docs/xiaoye-adoption-design.md §9，决议 D1）：轻量服务扣费。
+ * 与 DeductInput 的差异：不绑定 taskId —— 供提示词优化/反推这类"无任务的 LLM 服务"扣费。
+ */
+export interface SpendInput extends LedgerTxContext {
+  userId: string;
+  /** 目前仅允许 `'service_deduct'`（spend 内白名单校验） */
+  type: LedgerType;
+  amount: number;
+  /** 幂等键，建议 `svc:<kind>:<clientKey>`；与 userId 组成唯一键 */
+  idempotencyKey: string;
+  note?: string;
+}
+
+/**
  * tasks / worker 依赖的账本接口（CONTRACT.md §4 冻结形状）。
  * 注意：CONTRACT 列表里没有 `tx`，但字段是**可选增量**，不影响既有调用方的类型兼容；
  * tasks 传入 tx 时走调用方事务，不传则本模块自开事务。
@@ -74,6 +88,8 @@ export interface LedgerApi {
   deduct(input: DeductInput): Promise<{ balanceAfter: number }>;
   refundTask(input: RefundTaskInput): Promise<{ refunded: boolean; balanceAfter: number }>;
   grant(input: GrantInput): Promise<{ balanceAfter: number }>;
+  /** R1 修订：服务扣费（幂等重放 + balance>=amount 守卫，见 spend 实现） */
+  spend(input: SpendInput): Promise<{ balanceAfter: number }>;
   expiringSoon(userId: string, withinHours?: number): Promise<number>;
   expireBatch(input: ExpireBatchInput): Promise<{ balanceAfter: number }>;
 }
@@ -345,6 +361,82 @@ export const ledger: LedgerApi = {
             balanceAfter,
             idempotencyKey: input.idempotencyKey,
             expiresAt: input.expiresAt ?? null,
+            note: input.note ?? null,
+          },
+        });
+      } catch (e) {
+        if (isUniqueViolation(e)) {
+          const row = await tx.creditLedger.findUnique({
+            where: {
+              userId_idempotencyKey: { userId: input.userId, idempotencyKey: input.idempotencyKey },
+            },
+            select: { balanceAfter: true },
+          });
+          if (row) return { balanceAfter: row.balanceAfter };
+        }
+        throw e;
+      }
+
+      return { balanceAfter };
+    });
+  },
+
+  /**
+   * R1 修订：服务扣费（xiaoye-adoption F1/F2 提示词优化/反推，决议 D1）。
+   *
+   * 与 deduct 的差异：不绑定 taskId，不走任务退费语义，仅供轻量 LLM 服务扣费。
+   * 与 grant 同款裁决链：
+   *  - advisory 锁串行同用户变动；
+   *  - (user_id, idempotency_key) 撞键 = 并发重放 → 返回原 balanceAfter，不重复扣；
+   *  - `balance >= amount` 才写 `delta = -amount`，不足 → err.insufficientCredits(402)。
+   * 调用方预检与 spend 之间的竞态也由这里兜底：落空 → 402、不写流水、该次服务不收费。
+   * 负向流水 `expires_at` 一律 NULL（批次可追踪约束，见 grant 注释）。
+   */
+  async spend(input: SpendInput): Promise<{ balanceAfter: number }> {
+    if (!Number.isInteger(input.amount) || input.amount <= 0) {
+      throw err.invalidParams({
+        amount: input.amount,
+        reason: 'amount must be a positive integer',
+      });
+    }
+    if (input.type !== 'service_deduct') {
+      // 白名单：任务扣费走 deduct、活动发放走 grant，spend 只认服务扣费一种语义
+      throw err.invalidParams({ type: input.type, reason: 'spend only allows service_deduct' });
+    }
+
+    return withTx(input, async (tx) => {
+      await lockUser(tx, input.userId);
+
+      const existing = await tx.creditLedger.findUnique({
+        where: {
+          userId_idempotencyKey: { userId: input.userId, idempotencyKey: input.idempotencyKey },
+        },
+        select: { balanceAfter: true },
+      });
+      if (existing) {
+        log.info(
+          { userId: input.userId, idempotencyKey: input.idempotencyKey },
+          'spend replayed: return original result',
+        );
+        return { balanceAfter: existing.balanceAfter };
+      }
+
+      const bal = await sumDelta(tx, input.userId);
+      if (bal < input.amount) throw err.insufficientCredits(input.amount, bal);
+
+      const balanceAfter = bal - input.amount;
+      try {
+        await tx.creditLedger.create({
+          data: {
+            id: crypto.randomUUID(),
+            userId: input.userId,
+            delta: -input.amount,
+            type: input.type,
+            taskId: null,
+            orderId: null,
+            balanceAfter,
+            idempotencyKey: input.idempotencyKey,
+            expiresAt: null,
             note: input.note ?? null,
           },
         });

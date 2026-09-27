@@ -700,6 +700,47 @@
   opacity: 1;
 }
 
+.ref-thumb--uploading img {
+  opacity: 0.45;
+}
+
+.ref-thumb__spin {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--v-border-strong);
+  border-top-color: var(--v-accent);
+  border-radius: var(--v-r-full);
+  animation: v-spin 0.8s linear infinite;
+}
+
+.ref-thumb--error {
+  border-color: #e5484d;
+}
+
+.ref-thumb__err {
+  position: absolute;
+  left: 3px;
+  bottom: 2px;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: #e5484d;
+  border-radius: var(--v-r-full);
+}
+
+@keyframes v-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .ref-add {
   display: grid;
   place-items: center;
@@ -1111,6 +1152,87 @@
   background: var(--v-surface-sunken);
   border: 1px solid var(--v-border);
   cursor: default;
+}
+
+/* ================================================================ 登录弹窗 */
+
+.auth-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(16, 24, 40, 0.45);
+}
+
+.auth-card {
+  width: 340px;
+  background: var(--v-surface);
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-r-md);
+  box-shadow: var(--v-shadow-float);
+  overflow: hidden;
+}
+
+.auth-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--v-s1);
+  padding: var(--v-s3) var(--v-s4);
+  border-bottom: 1px solid var(--v-border);
+}
+
+.auth-tab {
+  padding: var(--v-s2) var(--v-s3);
+  font-size: var(--v-fs-base);
+  font-weight: 600;
+  color: var(--v-text-muted);
+  border-radius: var(--v-r-sm);
+}
+
+.auth-tab--active {
+  color: var(--v-text);
+  background: var(--v-surface-sunken);
+}
+
+.auth-close {
+  margin-left: auto;
+  color: var(--v-text-muted);
+  padding: var(--v-s1) var(--v-s2);
+}
+
+.auth-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--v-s3);
+  padding: var(--v-s4);
+}
+
+.auth-steps {
+  font-size: var(--v-fs-sm);
+  color: var(--v-text-muted);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--v-s1);
+  font-size: var(--v-fs-sm);
+  color: var(--v-text-muted);
+}
+
+.auth-field input {
+  padding: var(--v-s3);
+  font-size: var(--v-fs-base);
+  color: var(--v-text);
+  background: var(--v-canvas);
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-r-sm);
+}
+
+.auth-field input:focus {
+  outline: none;
+  border-color: var(--v-accent);
 }
 
 /* ================================================================ 提示条 */

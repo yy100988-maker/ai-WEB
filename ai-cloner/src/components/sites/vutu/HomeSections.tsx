@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight, ChevronLeft, ChevronRight, Copy, Eye, Heart, Star } from "lucide-react";
+import { ArrowRight, Copy, Eye, Heart, Star } from "lucide-react";
 import type { Locale } from "./site-data";
 import { siteContent } from "./site-data";
 import { catalogApi, promptsApi } from "@/lib/api/resources";
@@ -22,14 +22,29 @@ const TEMPLATES = [
   "/sites/vutu/templates/tpl-6.png",
   "/sites/vutu/templates/tpl-7.png",
   "/sites/vutu/templates/tpl-8.jpg",
+  // 补足 24 格：本地 showcase 资源复用（原 8 格 vs 源站 25 —— UI-DIFF P1-7）
+  "/sites/vutu/showcase/row-01.png",
+  "/sites/vutu/showcase/row-02.jpg",
+  "/sites/vutu/showcase/row-03.jpg",
+  "/sites/vutu/showcase/row-04.png",
+  "/sites/vutu/showcase/row-05.jpg",
+  "/sites/vutu/showcase/row-06.png",
+  "/sites/vutu/showcase/row-07.png",
+  "/sites/vutu/showcase/row-08.png",
+  "/sites/vutu/showcase/row-09.png",
+  "/sites/vutu/showcase/row-10.png",
+  "/sites/vutu/showcase/show-1.png",
+  "/sites/vutu/showcase/show-2.png",
+  "/sites/vutu/showcase/show-3.png",
+  "/sites/vutu/hero/hero-main.png",
+  "/sites/vutu/hero/hero-wide-1.jpg",
 ];
 
 export function TemplatesSection({ locale }: Props) {
   const dict = siteContent[locale];
   const appHref = locale === "en" ? "/en/app" : `/${locale}/app`;
   return (
-    <section className="bg-white py-[40px] text-black md:py-[90px]">
-      <div className="mx-auto max-w-[1420px] px-5 md:px-6">
+    <section className="bg-white py-[40px] text-black md:py-[90px]">      <div className="mx-auto max-w-[1420px] px-5 md:px-6">
         <div className="mb-[20px] text-center md:mb-[40px]">
           <h2 className="mx-auto max-w-2xl text-[22px] leading-snug font-extrabold md:text-[32px]">
             {dict.templatesTitle}
@@ -45,7 +60,7 @@ export function TemplatesSection({ locale }: Props) {
             <ArrowRight className="size-4" />
           </Link>
         </div>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
           {TEMPLATES.map((src, i) => (
             <div
               key={src}
@@ -261,6 +276,16 @@ export function PromptLibrary({ locale }: Props) {
                 card={c}
                 badge={lib.badge}
                 appHref={appHref}
+                copyLabel={
+                  locale === "zh-TW"
+                    ? "複製此 Prompt"
+                    : locale === "zh-CN"
+                      ? "复制此 Prompt"
+                      : "Copy this prompt"
+                }
+                copiedLabel={
+                  locale === "zh-TW" ? "已複製" : locale === "zh-CN" ? "已复制" : "Copied"
+                }
                 likes={likeCount[c.id] ?? null}
                 liked={liked[c.id] ?? false}
                 copied={copiedId === c.id}
@@ -288,6 +313,9 @@ interface PromptLibraryCardProps {
   };
   badge: string;
   appHref: string;
+  /** 复制按钮文案按 locale 取（原写死繁中「複製此 Prompt」——UI-DIFF P1-6） */
+  copyLabel: string;
+  copiedLabel: string;
   // like() 返回的实时数字（null = 用卡片自带数字）
   likes: number | null;
   liked: boolean;
@@ -326,6 +354,8 @@ function PromptLibraryCard({
   card,
   badge,
   appHref,
+  copyLabel,
+  copiedLabel,
   likes,
   liked,
   copied,
@@ -418,7 +448,7 @@ function PromptLibraryCard({
             className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-lg transition-transform hover:scale-105"
           >
             <Copy className="size-4" />
-            {copied ? "已複製" : "複製此 Prompt"}
+            {copied ? copiedLabel : copyLabel}
             <ArrowRight className="size-4" />
           </button>
         </div>
@@ -466,8 +496,7 @@ function PromptLibraryCard({
 
 export function Testimonials({ locale }: Props) {
   const dict = siteContent[locale];
-  const [idx, setIdx] = useState(0);
-  const t = dict.testimonials[idx % dict.testimonials.length];
+  // 一次渲染全部条目（原为单卡轮播，SSR 只出 1 条 —— UI-DIFF P1-7 评价 1 vs 4）
   return (
     <section className="border-t border-black/5 bg-[#f9f9fa] py-[40px] text-black md:py-[90px]">
       <div className="mx-auto max-w-[1420px] px-5 md:px-6">
@@ -479,51 +508,36 @@ export function Testimonials({ locale }: Props) {
             {dict.testimonialsBody}
           </p>
         </div>
-        <div className="mx-auto max-w-3xl rounded-3xl border border-black/10 bg-white p-8 shadow-sm md:p-10">
-          <div className="flex flex-col items-start gap-5">
-            <Image
-              src={t.avatar}
-              alt={t.name}
-              width={136}
-              height={136}
-              loading="lazy"
-              className="size-[68px] rounded-full border-2 border-white object-cover shadow"
-            />
-            <p className="text-[12px] leading-[18px] text-[#5c5c5c]">
-              {t.quote}
-            </p>
-          </div>
-          <div className="mt-6 flex items-end justify-between">
-            <div>
-              <p className="text-[18px] font-bold text-[#5c5c5c]">{t.name}</p>
-              <p className="text-[12px] font-medium text-[#5c5c5c]">{t.role}</p>
-              <span className="mt-1 flex gap-0.5" aria-hidden>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Star key={i} className="size-4 fill-amber-400 text-amber-400" />
-                ))}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                aria-label="Show previous testimonial"
-                onClick={() =>
-                  setIdx((v) => (v + dict.testimonials.length - 1) % dict.testimonials.length)
-                }
-                className="flex size-9 items-center justify-center rounded-full border border-black/10 text-black/70 hover:bg-black/5"
-              >
-                <ChevronLeft className="size-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Show next testimonial"
-                onClick={() => setIdx((v) => (v + 1) % dict.testimonials.length)}
-                className="flex size-9 items-center justify-center rounded-full border border-black/10 text-black/70 hover:bg-black/5"
-              >
-                <ChevronRight className="size-4" />
-              </button>
-            </div>
-          </div>
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+          {dict.testimonials.map((t) => (
+            <figure
+              key={t.name}
+              className="flex flex-col gap-4 rounded-3xl border border-black/10 bg-white p-6 shadow-sm md:p-7"
+            >
+              <Image
+                src={t.avatar}
+                alt={t.name}
+                width={136}
+                height={136}
+                loading="lazy"
+                className="size-[56px] rounded-full border-2 border-white object-cover shadow"
+              />
+              <blockquote className="text-[13px] leading-[20px] text-[#5c5c5c]">
+                {t.quote}
+              </blockquote>
+              <div className="mt-auto">
+                <figcaption>
+                  <p className="text-base font-bold text-[#5c5c5c]">{t.name}</p>
+                  <p className="text-xs font-medium text-[#5c5c5c]">{t.role}</p>
+                </figcaption>
+                <span className="mt-1.5 flex gap-0.5" aria-hidden>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Star key={i} className="size-4 fill-amber-400 text-amber-400" />
+                  ))}
+                </span>
+              </div>
+            </figure>
+          ))}
         </div>
       </div>
     </section>

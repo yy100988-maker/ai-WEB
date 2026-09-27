@@ -43,19 +43,19 @@ export const ru: SiteDictionary = {
       title: "Творите вне любых форматов.",
       body: "Текст, фото, видео, аудио — каждый формат это промпт. Видео, изображения, аватары и музыка — Vutu, всё в одном.",
       cta: "Создать",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Идеи — в действие.",
       body: "Мощнейший видеоагент. Ваш ИИ-режиссёр. От идеи до финального монтажа — планирует, создаёт и дорабатывает сам.",
       cta: "Создать",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Настройте всё. Точно как задумано.",
       body: "Тяните, бросайте и кладите каждую правку ровно туда, куда нужно. Vutu Canvas делает монтаж интуитивным.",
       cta: "Создать",
-      href: "/app/video",
+      href: `${B}/app`,
     },
   ],
   featuresTitle: "Возможности",
@@ -69,7 +69,7 @@ export const ru: SiteDictionary = {
     {
       title: "ИИ-реклама",
       body: "Добавьте товар — получите ролики для каждой платформы.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "AI Ads",
     },
     {
@@ -81,19 +81,19 @@ export const ru: SiteDictionary = {
     {
       title: "ИИ-аватар",
       body: "Превратите фото в цифрового ведущего.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Avatar",
     },
     {
       title: "Текст в речь",
       body: "Введите сценарий — услышите живой голос.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "TTS",
     },
     {
       title: "ИИ-музыка",
       body: "Выберите настроение — заберите свой BGM.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Music",
     },
   ],
@@ -219,10 +219,10 @@ export const ru: SiteDictionary = {
     {
       head: "Создание",
       links: [
-        { label: "ИИ-агент", href: "/app/video" },
-        { label: "ИИ-холст", href: "/app/video" },
+        { label: "ИИ-агент", href: `${B}/app` },
+        { label: "ИИ-холст", href: `${B}/app` },
         { label: "ИИ-редактор", href: `${B}/text-to-video` },
-        { label: "Текст в речь", href: `${B}/pricing` },
+        { label: "Текст в речь", href: `${B}/app?tool=audio` },
       ],
     },
     {
@@ -236,10 +236,10 @@ export const ru: SiteDictionary = {
     {
       head: "Компания",
       links: [
-        { label: "Контакты", href: `${B}/pricing` },
+        { label: "Контакты", href: "/contact-us" },
         { label: "Тарифы", href: `${B}/pricing` },
-        { label: "Условия", href: `${B}/pricing` },
-        { label: "Приватность", href: `${B}/pricing` },
+        { label: "Условия", href: "/terms" },
+        { label: "Приватность", href: "/privacy-policy" },
       ],
     },
   ],

@@ -2,8 +2,7 @@ import Link from "next/link";
 import type { Locale } from "./site-data";
 import { siteContent } from "./site-data";
 
-export function StepsHow({ locale }: { locale: Locale }) {
-  const dict = siteContent[locale];
+export function StepsHow({ locale }: { locale: Locale }) {  const dict = siteContent[locale];
   return (
     <section id="how" className="border-t border-black/10 bg-white text-black">
       <div className="mx-auto max-w-4xl px-4 py-16">
@@ -33,16 +32,26 @@ export function StepsHow({ locale }: { locale: Locale }) {
   );
 }
 
-export function Faq({ locale }: { locale: Locale }) {
+/** FAQ 区块。`list`/`title` 可覆盖字典默认值（i2v 页传首页通用 FAQ、定价页传价格 FAQ）。 */
+export function Faq({
+  locale,
+  list,
+  title,
+}: {
+  locale: Locale;
+  list?: { q: string; a: string }[];
+  title?: string;
+}) {
   const dict = siteContent[locale];
+  const items = list ?? dict.faqs;
   return (
     <section className="border-t border-black/10 bg-[#fafafa] text-black">
       <div className="mx-auto max-w-4xl px-4 py-16">
         <h2 className="text-center text-2xl font-bold tracking-tight">
-          {dict.faqTitle}
+          {title ?? dict.faqTitle}
         </h2>
         <div className="mt-8 divide-y divide-black/10 rounded-2xl border border-black/10 bg-white">
-          {dict.faqs.map((f) => (
+          {items.map((f) => (
             <details key={f.q} className="group px-5 py-4">
               <summary className="cursor-pointer list-none text-sm font-semibold group-open:text-violet-700">
                 {f.q}
@@ -58,6 +67,7 @@ export function Faq({ locale }: { locale: Locale }) {
 
 export function CtaBanner({ locale }: { locale: Locale }) {
   const dict = siteContent[locale];
+  const appHref = locale === "en" ? "/en/app" : `/${locale}/app`;
   return (
     <section className="border-t border-black/5 bg-[#f9f9fa] text-black">
       <div className="mx-auto max-w-[1420px] px-5 py-16 text-center md:px-6">
@@ -68,7 +78,7 @@ export function CtaBanner({ locale }: { locale: Locale }) {
           {dict.ctaBody}
         </p>
         <Link
-          href="/app/video"
+          href={appHref}
           className="mt-7 inline-block rounded-full bg-[#1f11ed] px-8 py-3 text-sm font-bold text-white hover:opacity-90"
         >
           {dict.ctaButton}

@@ -43,19 +43,19 @@ export const fr: SiteDictionary = {
       title: "Créez au-delà de tout format.",
       body: "Texte, photos, vidéo, audio — chaque format est un prompt. Vidéo, images, avatars et musique — Vutu, all in one.",
       cta: "Créer maintenant",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Transformez les idées en action.",
       body: "Le Video Agent le plus puissant. Votre réalisateur IA. De l'idée au montage final — il planifie, crée et itère, en toute autonomie.",
       cta: "Créer maintenant",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Ajustez tout. Exactement comme prévu.",
       body: "Glissez, déposez et placez chaque modification exactement là où vous le souhaitez. Vutu Canvas rend l'édition intuitive.",
       cta: "Créer maintenant",
-      href: "/app/video",
+      href: `${B}/app`,
     },
   ],
   featuresTitle: "Caractéristiques",
@@ -69,7 +69,7 @@ export const fr: SiteDictionary = {
     {
       title: "Annonces IA",
       body: "Ajoutez un produit et obtenez des publicités pour chaque plateforme.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "AI Ads",
     },
     {
@@ -81,19 +81,19 @@ export const fr: SiteDictionary = {
     {
       title: "Avatar IA",
       body: "Transformez une photo en présentateur numérique.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Avatar",
     },
     {
       title: "Synthèse vocale",
       body: "Saisissez un script, écoutez une voix naturelle.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "TTS",
     },
     {
       title: "Musique IA",
       body: "Choisissez une ambiance, obtenez votre BGM.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Music",
     },
   ],
@@ -219,10 +219,10 @@ export const fr: SiteDictionary = {
     {
       head: "Créer",
       links: [
-        { label: "Agent IA", href: "/app/video" },
-        { label: "Canvas IA", href: "/app/video" },
+        { label: "Agent IA", href: `${B}/app` },
+        { label: "Canvas IA", href: `${B}/app` },
         { label: "Éditeur IA", href: `${B}/text-to-video` },
-        { label: "Synthèse vocale", href: `${B}/pricing` },
+        { label: "Synthèse vocale", href: `${B}/app?tool=audio` },
       ],
     },
     {
@@ -236,10 +236,10 @@ export const fr: SiteDictionary = {
     {
       head: "Société",
       links: [
-        { label: "Contact", href: `${B}/pricing` },
+        { label: "Contact", href: "/contact-us" },
         { label: "Tarifs", href: `${B}/pricing` },
-        { label: "CGU", href: `${B}/pricing` },
-        { label: "Confidentialité", href: `${B}/pricing` },
+        { label: "CGU", href: "/terms" },
+        { label: "Confidentialité", href: "/privacy-policy" },
       ],
     },
   ],

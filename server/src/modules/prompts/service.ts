@@ -94,7 +94,7 @@ function toCard(post: PromptPost): PromptCardDto {
   return {
     id: publicIdOf(post),
     title: post.title,
-    img: post.imgUrl,
+    img: cardImage(post),
     cat: post.tabCode,
     // 实时计数：直接读列（PRD §8.8 "views/likes 取实时计数，非 locale 硬编码"）
     views: post.views,
@@ -103,6 +103,20 @@ function toCard(post: PromptPost): PromptCardDto {
     // title 即 prompt 全文（详细设计 §1.9："卡片标题 = 可复制内容"）
     prompt: post.title,
   };
+}
+
+/**
+ * 卡片图片地址（R1，方案 §6.1）：`pp/<id>` 相对键 → 站点绝对图片路由（现签现跳 302）。
+ * 列表字段**永不携带**会过期的预签名 URL（2026-09-22 生图不显示是同族教训）；
+ * 种子/外部直链原样返回。
+ */
+function cardImage(post: PromptPost): string {
+  if (post.imgUrl.startsWith('pp/')) {
+    // 相对绝对路径：`/api` 由站点 nginx 反代到本服务，origin 自动对齐当前站点、零配置
+    // （方案 §6.1：列表字段永不携带会过期的预签名）。
+    return `/api/v1/prompt-library/${publicIdOf(post)}/image`;
+  }
+  return post.imgUrl;
 }
 
 /**
@@ -123,6 +137,7 @@ export async function listLibrary(input: { cat?: string }): Promise<PromptLibrar
     db().promptPost.findMany({
       where: {
         active: true,
+        status: 'published', // F4（方案 §6）：pending/rejected 绝不进首页
         ...(cat === 'all' ? {} : { tabCode: cat }),
       },
       orderBy: [{ sort: 'asc' }, { createdAt: 'desc' }],

@@ -31,6 +31,7 @@ enum LedgerType {
   refund
   admin_adjust
   promo
+  service_deduct
   expire
 }
 
@@ -281,6 +282,8 @@ model Task {
   refunded        Boolean    @default(false)
   attempts        Int        @default(0)
   idempotencyKey  String     @map("idempotency_key")
+  // F5 批量生成分组键（R1，方案 §7）：`b_...`，仅展示/分组语义，不参与计费
+  batchId         String?    @map("batch_id")
   priority        Int        @default(0)
   queuedAt        DateTime   @default(now()) @map("queued_at") @db.Timestamptz
   startedAt       DateTime?  @map("started_at") @db.Timestamptz
@@ -294,6 +297,8 @@ model Task {
   @@index([userId, status, createdAt(sort: Desc)])
   @@index([externalJobId])
   @@index([status, queuedAt])
+  @@index([userId, batchId])
+
   @@map("tasks")
 }
 
@@ -579,6 +584,11 @@ model PromptPost {
 
   events PromptPostEvent[]
 
+  // F4 审核状态机（R1，方案 §6）：pending|published|rejected；存量 seed 行默认 published（决议 D3）
+  status       String    @default("published")
+  createdBy    String?   @map("created_by") @db.Uuid
+  rejectReason String?   @map("reject_reason")
+
   @@index([tabCode, active, sort])
   @@map("prompt_posts")
 }
@@ -595,6 +605,25 @@ model PromptPostEvent {
   @@unique([postId, userId, event, date])
   @@index([postId, date])
   @@map("prompt_post_events")
+}
+
+// ---------- 1.9.x 兑换码（R1，xiaoye-adoption F3，方案 §5） ----------
+
+model RedeemKey {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // sha256(code) —— 只存哈希，明文仅生成时返回一次（对齐 adminKeyFingerprint 教训）
+  codeHash     String    @unique @map("code_hash")
+  batchId      String    @map("batch_id")
+  credits      Int
+  note         String?
+  expiresAt    DateTime? @map("expires_at") @db.Timestamptz
+  redeemedById String?   @map("redeemed_by_id") @db.Uuid
+  redeemedAt   DateTime? @map("redeemed_at") @db.Timestamptz
+  createdBy    String    @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([batchId])
+  @@map("redeem_keys")
 }
 
 // ---------- 1.10 Remix（Phase 2 表结构先行） ----------

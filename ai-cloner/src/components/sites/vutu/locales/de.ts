@@ -43,19 +43,19 @@ export const de: SiteDictionary = {
       title: "Erschaffe jenseits jedes Formats.",
       body: "Text, Fotos, Video, Audio — jedes Format ist ein Prompt. Video, Bilder, Avatare und Musik — Vutu, all in one.",
       cta: "Jetzt erstellen",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Ideen in Taten verwandeln.",
       body: "Der leistungsstärkste Video Agent. Dein KI-Regisseur. Von der Idee zum finalen Schnitt — er plant, erschafft und iteriert, ganz eigenständig.",
       cta: "Jetzt erstellen",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Alles anpassen. Genau wie gewünscht.",
       body: "Ziehen, ablegen und jede Bearbeitung genau dort platzieren, wo du sie haben möchtest. Vutu Canvas macht Bearbeiten intuitiv.",
       cta: "Jetzt erstellen",
-      href: "/app/video",
+      href: `${B}/app`,
     },
   ],
   featuresTitle: "Merkmale",
@@ -69,7 +69,7 @@ export const de: SiteDictionary = {
     {
       title: "KI-Werbung",
       body: "Produkt rein, Werbevideos für jede Plattform raus.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "AI Ads",
     },
     {
@@ -81,19 +81,19 @@ export const de: SiteDictionary = {
     {
       title: "KI-Avatar",
       body: "Aus einem Foto wird dein digitaler Moderator.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Avatar",
     },
     {
       title: "Text zu Sprache",
       body: "Skript rein, natürliche Stimme raus.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "TTS",
     },
     {
       title: "KI-Musik",
       body: "Stimmung wählen, original BGM erhalten.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Music",
     },
   ],
@@ -219,10 +219,10 @@ export const de: SiteDictionary = {
     {
       head: "Erstellen",
       links: [
-        { label: "KI-Agent", href: "/app/video" },
-        { label: "KI-Canvas", href: "/app/video" },
+        { label: "KI-Agent", href: `${B}/app` },
+        { label: "KI-Canvas", href: `${B}/app` },
         { label: "KI-Editor", href: `${B}/text-to-video` },
-        { label: "Text zu Sprache", href: `${B}/pricing` },
+        { label: "Text zu Sprache", href: `${B}/app?tool=audio` },
       ],
     },
     {
@@ -236,10 +236,10 @@ export const de: SiteDictionary = {
     {
       head: "Firma",
       links: [
-        { label: "Kontakt", href: `${B}/pricing` },
+        { label: "Kontakt", href: "/contact-us" },
         { label: "Preise", href: `${B}/pricing` },
-        { label: "AGB", href: `${B}/pricing` },
-        { label: "Datenschutz", href: `${B}/pricing` },
+        { label: "AGB", href: "/terms" },
+        { label: "Datenschutz", href: "/privacy-policy" },
       ],
     },
   ],

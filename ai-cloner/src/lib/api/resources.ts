@@ -167,6 +167,8 @@ export interface SubmitTaskInput {
   inputAssetIds?: string[];
   params?: Record<string, string | number | boolean | string[]>;
   idempotencyKey: string;
+  /** F5 批量分组键（方案 §7）：`b_...`，可选；仅展示/分组语义，不参与计费 */
+  batchId?: string;
 }
 
 export const tasksApi = {
@@ -324,5 +326,31 @@ export const promptsApi = {
   },
   like(id: string): Promise<{ liked: boolean; likes: number }> {
     return api(`/prompt-library/${encodeURIComponent(id)}/like`, { method: "POST" });
+  },
+  /** F1 提示词优化（决议 D1：charge-after 扣积分） */
+  optimize(prompt: string, idempotencyKey: string): Promise<{ optimized: string; credits: number; latencyMs: number }> {
+    return api("/prompts/optimize", {
+      method: "POST",
+      auth: true,
+      body: { prompt },
+      headers: { "Idempotency-Key": idempotencyKey },
+    });
+  },
+  /** F2 反推提示词（图片 → 提示词） */
+  reverse(assetId: string): Promise<{ prompt: string; assetId: string; credits: number; latencyMs: number }> {
+    return api("/prompts/reverse", {
+      method: "POST",
+      auth: true,
+      body: { assetId },
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
+  },
+  /** F4 发布到灵感广场（决议 D3：autoApprove 缺省 true 即 published） */
+  publish(body: { tabCode: string; title: string; assetId: string }): Promise<{ publicId: string; status: string }> {
+    return api("/prompt-library", { method: "POST", auth: true, body });
+  },
+  /** F3 兑换码（条件更新防双花 → grant type=promo） */
+  redeem(code: string): Promise<{ credits: number; balanceAfter: number }> {
+    return api("/billing/redeem", { method: "POST", auth: true, body: { code } });
   },
 };

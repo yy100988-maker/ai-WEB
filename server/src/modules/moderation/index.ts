@@ -8,7 +8,7 @@
  *
  * 本模块的三条硬性约束：
  *  ① **绝不真连上游**：L2 的 LLM 调用走 `LlmClassifier` 接口，本期默认实现是**本地启发式分类器**，
- *     Phase 2 才换成 `LK888 /v1/skills/chat` 真实调用（替换点已在 `heuristicClassifier` 注释标明）。
+ *     Phase 2 才换成 `LK888 /v1/chat/completions`（OpenAI 格式 —— 实测端点见 docs/lk888-capabilities.md §3.2；旧注释曾误记为 `/v1/skills/chat`，skills 清单不含它）真实调用（替换点已在 `heuristicClassifier` 注释标明）。
  *  ② **绝不存 prompt 原文**：审计只写 sha256（`recordModerationLog`）。
  *  ③ **fail-open 是硬性要求**：上游自带二道审核兜底，本地误杀比漏放的业务损失更大
  *     （PRD §4.2：超时走 fail-open + error 日志 + 告警计数）。

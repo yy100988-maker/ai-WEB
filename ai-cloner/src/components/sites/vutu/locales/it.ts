@@ -43,19 +43,19 @@ export const it: SiteDictionary = {
       title: "Crea oltre qualsiasi formato.",
       body: "Testo, foto, video, audio — ogni formato è un prompt. Video, immagini, avatar e musica — Vutu, all in one.",
       cta: "Crea ora",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Trasforma le idee in azione.",
       body: "Il Video Agent più potente. Il tuo regista IA. Dall'idea al montaggio finale — pianifica, crea e itera, in totale autonomia.",
       cta: "Crea ora",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "Modifica tutto. Esattamente come vuoi.",
       body: "Trascina, rilascia e posiziona ogni modifica esattamente dove vuoi. Vutu Canvas rende l'editing intuitivo.",
       cta: "Crea ora",
-      href: "/app/video",
+      href: `${B}/app`,
     },
   ],
   featuresTitle: "Caratteristiche",
@@ -69,7 +69,7 @@ export const it: SiteDictionary = {
     {
       title: "Annunci IA",
       body: "Aggiungi un prodotto e ottieni video per ogni piattaforma.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "AI Ads",
     },
     {
@@ -81,19 +81,19 @@ export const it: SiteDictionary = {
     {
       title: "Avatar IA",
       body: "Da una foto al tuo presentatore digitale.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Avatar",
     },
     {
       title: "Testo in voce",
       body: "Scrivi un copione, ascoltalo con voce naturale.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "TTS",
     },
     {
       title: "Musica IA",
       body: "Scegli l'atmosfera, ricevi la tua BGM.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Music",
     },
   ],
@@ -219,10 +219,10 @@ export const it: SiteDictionary = {
     {
       head: "Crea",
       links: [
-        { label: "Agente IA", href: "/app/video" },
-        { label: "Canvas IA", href: "/app/video" },
+        { label: "Agente IA", href: `${B}/app` },
+        { label: "Canvas IA", href: `${B}/app` },
         { label: "Editor IA", href: `${B}/text-to-video` },
-        { label: "Testo in voce", href: `${B}/pricing` },
+        { label: "Testo in voce", href: `${B}/app?tool=audio` },
       ],
     },
     {
@@ -236,10 +236,10 @@ export const it: SiteDictionary = {
     {
       head: "Azienda",
       links: [
-        { label: "Contatti", href: `${B}/pricing` },
+        { label: "Contatti", href: "/contact-us" },
         { label: "Prezzi", href: `${B}/pricing` },
-        { label: "Termini", href: `${B}/pricing` },
-        { label: "Privacy", href: `${B}/pricing` },
+        { label: "Termini", href: "/terms" },
+        { label: "Privacy", href: "/privacy-policy" },
       ],
     },
   ],

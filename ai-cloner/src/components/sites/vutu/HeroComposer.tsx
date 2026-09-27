@@ -8,6 +8,8 @@ import { siteContent } from "./site-data";
 import { AuthProvider, useAuth } from "@/lib/api/auth-context";
 import { useTaskRunner } from "@/lib/api/use-task-runner";
 import { AuthDialog } from "./AuthDialog";
+import { promptsApi } from "@/lib/api/resources";
+import { errCode, pickFeature } from "./feature-ui";
 
 interface HeroComposerProps {
   locale: Locale;
@@ -39,13 +41,43 @@ const SHOWS = [
 // 未登录时保持原 mock 外观：按钮可点 → 弹登录，不发任何请求。
 function HeroComposerInner({ locale }: HeroComposerProps) {
   const dict = siteContent[locale];
-  const { user } = useAuth();
+  const f = pickFeature(locale);
+  const { user, refresh } = useAuth();
   const { running, status, progress, results, error, run } = useTaskRunner();
   const [prompt, setPrompt] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [show, setShow] = useState(1);
   const [loginOpen, setLoginOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // F1 提示词优化（charge-after 扣积分 → refresh；失败保留原文）
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeErr, setOptimizeErr] = useState<string | null>(null);
+  async function doOptimize(): Promise<void> {
+    if (optimizing) return;
+    if (user === null) {
+      setLoginOpen(true);
+      return;
+    }
+    const src = prompt.trim();
+    if (!src) {
+      setOptimizeErr(f.needPrompt);
+      return;
+    }
+    setOptimizing(true);
+    setOptimizeErr(null);
+    try {
+      const out = await promptsApi.optimize(src, crypto.randomUUID());
+      setPrompt(out.optimized.slice(0, 2000));
+      void refresh();
+    } catch (e) {
+      const code = errCode(e);
+      if (code === "UNAUTHORIZED") setLoginOpen(true);
+      else setOptimizeErr(f.optimizeFail);
+    } finally {
+      setOptimizing(false);
+    }
+  }
 
   const working = running;
   const done = status === "succeeded";
@@ -74,6 +106,9 @@ function HeroComposerInner({ locale }: HeroComposerProps) {
 
   const h1a = dict.h1a;
   const h1b = dict.h1b;
+  // H1 两段拼接：全角标点结尾（，、。：等）后不加空格，其余（含 ASCII 逗号/冒号/
+  // 破折号）补一个空格 —— 修 UI-DIFF 报告 P1-6「Publish,By」缺空格。
+  const h1Sep = /[，、。；：！？）】」』]$/u.test(h1a.trim()) ? "" : " ";
 
   return (
     <section className="relative overflow-hidden bg-[#f9f9fa] pt-[104px] text-black md:pt-[194px]">
@@ -86,6 +121,7 @@ function HeroComposerInner({ locale }: HeroComposerProps) {
           <h1 className="mx-auto flex flex-col items-center justify-center gap-0 text-center md:max-w-[1300px]">
             <span className="text-[24px] leading-[normal] font-extrabold text-black md:text-[42px]">
               <span className="block md:inline">{h1a}</span>
+              {h1Sep}
               <span
                 className="block bg-clip-text text-transparent md:inline"
                 style={{
@@ -138,6 +174,16 @@ function HeroComposerInner({ locale }: HeroComposerProps) {
               >
                 <AtSign className="size-4" />
               </button>
+              <button
+                type="button"
+                onClick={() => void doOptimize()}
+                disabled={optimizing || working || !prompt.trim()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#1f11ed]/25 bg-[#f0eefe] px-4 py-2 text-xs font-semibold text-[#1f11ed] hover:bg-[#e7e6fd] disabled:opacity-50"
+              >
+                {optimizing && <Loader2 className="size-3.5 animate-spin" />}
+                {optimizing ? f.optimizing : f.optimize}
+              </button>
+              {optimizeErr && <p className="w-full px-1 text-[11px] text-red-600">{optimizeErr}</p>}
               <button
                 type="button"
                 onClick={handleCreate}

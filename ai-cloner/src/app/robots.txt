@@ -1,0 +1,16 @@
+User-Agent: *
+Allow: /
+Disallow: /en/app
+Disallow: /app/
+Disallow: /zh-TW/app
+Disallow: /zh-CN/app
+Disallow: /ja/app
+Disallow: /de/app
+Disallow: /fr/app
+Disallow: /ru/app
+Disallow: /es/app
+Disallow: /ko/app
+Disallow: /pt/app
+Disallow: /it/app
+
+Sitemap: https://ai.vutu.cc/sitemap.xml

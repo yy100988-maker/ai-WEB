@@ -12,9 +12,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api,
   ApiError,
+  clearSession,
+  isLoggedIn,
   matchPrice,
   newIdempotencyKey,
   offlineMode,
+  restoreSession,
   streamTask,
   toParamOptions,
   type Capability,
@@ -29,7 +32,9 @@ import { TopBar } from './components/TopBar';
 import { ModelRail } from './components/ModelRail';
 import { ResultFeed } from './components/ResultFeed';
 import { Inspector } from './components/Inspector';
-import { Composer } from './components/Composer';
+import { Composer, type RefImage } from './components/Composer';
+import { AuthDialog } from './components/AuthDialog';
+import { BatchPanel } from './components/BatchPanel';
 import './styles/app.css';
 
 /** 生成参数（面板与 composer 共享） */
@@ -62,20 +67,174 @@ export default function App() {
   // ---------------- 输入与参数 ----------------
   const [prompt, setPrompt] = useState('');
   const [params, setParams] = useState<GenParams>(DEFAULT_PARAMS);
-  const [references, setReferences] = useState<Array<{ id: string; name: string; url: string }>>([]);
+  const [references, setReferences] = useState<RefImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  // ---------------- 会话 ----------------
+  const [credits, setCredits] = useState<number | null>(null);
+  const [userLabel, setUserLabel] = useState<string | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [maxConcurrency, setMaxConcurrency] = useState(2);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+
+  const notify = useCallback((kind: 'ok' | 'err', text: string) => {
+    setToast({ kind, text });
+    window.setTimeout(() => setToast(null), 3600);
+  }, []);
+
+  // ---------------- 会话恢复：localStorage token → me（余额/昵称） ----------------
+  const refreshMe = useCallback(async () => {
+    try {
+      const me = await api.me();
+      setCredits(me.balance.credits);
+      setMaxConcurrency(me.user.plan.maxConcurrency);
+      setUserLabel(me.user.displayName ?? me.user.email ?? me.user.phone ?? '已登录');
+    } catch {
+      // token 失效（刷新也救不回）→ 回到未登录
+      clearSession();
+      setCredits(null);
+      setUserLabel(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (restoreSession()) void refreshMe();
+  }, [refreshMe]);
+
+  // ---------------- F2 反推 / F4 发布（决议 D1 扣积分 / D3 自动过审） ----------------
+  const tabsCacheRef = useRef<Array<{ id: string }> | null>(null);
+
+  async function handleReverse(task: TaskSummary): Promise<void> {
+    const assetId = task.results?.[0]?.assetId;
+    if (!assetId) {
+      notify('err', '该任务没有可反推的结果图');
+      return;
+    }
+    try {
+      const out = await api.reversePrompt(assetId);
+      setPrompt(out.prompt);
+      notify('ok', `已提取提示词（消耗 ${out.credits} 积分）`);
+      void refreshMe();
+    } catch (e) {
+      notify('err', e instanceof ApiError ? e.message : '反推失败');
+    }
+  }
+
+  async function handlePublish(task: TaskSummary): Promise<void> {
+    const assetId = task.results?.[0]?.assetId;
+    const title = (task.prompt ?? '').trim();
+    if (!assetId) {
+      notify('err', '没有可发布的结果图');
+      return;
+    }
+    if (!title) {
+      notify('err', '该任务没有提示词可发布');
+      return;
+    }
+    try {
+      if (tabsCacheRef.current === null) {
+        const lib = await api.promptLibrary();
+        tabsCacheRef.current = lib.tabs;
+      }
+      const tab = tabsCacheRef.current.find((x) => x.id !== 'all');
+      if (!tab) {
+        notify('err', '暂无可发布的分类');
+        return;
+      }
+      const res = await api.publishPost({ tabCode: tab.id, title: title.slice(0, 2000), assetId });
+      notify('ok', res.status === 'published' ? '已发布到灵感广场' : '已提交审核');
+    } catch (e) {
+      notify('err', e instanceof ApiError ? e.message : '发布失败');
+    }
+  }
+
+  // ---------------- F5 批量生成（客户端扇出 + batchId 分组；波次并发 = plan.maxConcurrency） ----------------
+  async function runBatch(cfg: {
+    prompt: string;
+    n: number;
+    aspectRatio: string;
+    resolution: string;
+  }): Promise<void> {
+    if (batchBusy) return;
+    setBatchBusy(true);
+    setBatchOpen(false);
+    const batchId = `b_${crypto.randomUUID()}`;
+    const capability: Capability = references.length > 0 ? 'image_to_image' : 'text_to_image';
+    const inputAssetIds = references.map((r) => r.assetId).filter((id): id is string => Boolean(id));
+    const wave = Math.max(1, maxConcurrency);
+    const indices = Array.from({ length: cfg.n }, (_, i) => i);
+    let ok = 0;
+    let fail = 0;
+    for (let start = 0; start < indices.length; start += wave) {
+      const slice = indices.slice(start, start + wave);
+      await Promise.all(
+        slice.map(async (i) => {
+          const tempId = `temp_${batchId}_${i}`;
+          const optimistic: TaskSummary = {
+            id: tempId,
+            status: 'queued',
+            progress: 0,
+            capability,
+            prompt: cfg.prompt,
+            model: { id: selectedId, displayName: displayNameOf(models, selectedId) },
+            params: { aspectRatio: cfg.aspectRatio, resolution: cfg.resolution, count: 1 },
+            results: [],
+            createdAt: new Date().toISOString(),
+          };
+          setTasks((prev) => [optimistic, ...prev]);
+          try {
+            const { task } = await api.createTask({
+              capability,
+              modelId: selectedId,
+              prompt: cfg.prompt,
+              inputAssetIds,
+              params: { aspectRatio: cfg.aspectRatio, resolution: cfg.resolution, count: 1 },
+              idempotencyKey: newIdempotencyKey(),
+              batchId,
+            });
+            setTasks((prev) =>
+              prev.map((x) => (x.id === tempId ? { ...task, prompt: cfg.prompt } : task)),
+            );
+            ok += 1;
+          } catch {
+            // 逐项独立失败（对齐 assets batch-delete 语义），单项失败不影响其余
+            setTasks((prev) => prev.filter((x) => x.id !== tempId));
+            fail += 1;
+          }
+        }),
+      );
+    }
+    setBatchBusy(false);
+    void refreshMe();
+    notify(
+      fail > 0 ? 'err' : 'ok',
+      fail > 0 ? `批量提交：成功 ${ok} · 失败 ${fail}` : `批量完成：${ok} 个任务已提交`,
+    );
+  }
+
+  const handleAuthButton = useCallback(() => {
+    if (isLoggedIn()) {
+      // 已登录态点账号 → 登出
+      void (async () => {
+        await api.logout();
+        clearSession();
+        setCredits(null);
+        setUserLabel(null);
+        setTasks(DEMO_TASKS);
+        notify('ok', '已退出登录');
+      })();
+    } else {
+      setAuthOpen(true);
+    }
+  }, [notify]);
 
   /** 每个任务的 SSE 取消函数 */
   const streamsRef = useRef(new Map<string, () => void>());
 
   /** 目录加载时已取到的模型详情缓存，避免切换模型重复请求 */
   const detailsByIdRef = useRef(new Map<string, ResolvedModelDetail>());
-
-  const notify = useCallback((kind: 'ok' | 'err', text: string) => {
-    setToast({ kind, text });
-    window.setTimeout(() => setToast(null), 3600);
-  }, []);
 
   // ---------------- 首次加载目录 ----------------
   useEffect(() => {
@@ -277,6 +436,21 @@ export default function App() {
       notify('err', '请先选择模型');
       return;
     }
+    if (!isLoggedIn()) {
+      notify('err', '请先登录后再生成');
+      setAuthOpen(true);
+      return;
+    }
+    const pending = references.filter((r) => r.status === 'uploading');
+    if (pending.length > 0) {
+      notify('err', `还有 ${pending.length} 张参考图上传中，稍候再提交`);
+      return;
+    }
+    const failed = references.filter((r) => r.status === 'error' || !r.assetId);
+    if (failed.length > 0) {
+      notify('err', `${failed.length} 张参考图未上传成功，请移除后重试`);
+      return;
+    }
 
     const capability: Capability = references.length > 0 ? 'image_to_image' : 'text_to_image';
 
@@ -301,7 +475,7 @@ export default function App() {
         capability,
         modelId: selectedId,
         prompt: text,
-        inputAssetIds: references.map((r) => r.id),
+        inputAssetIds: references.map((r) => r.assetId).filter((id): id is string => Boolean(id)),
         params: {
           aspectRatio: params.aspectRatio,
           resolution: params.resolution,
@@ -316,6 +490,8 @@ export default function App() {
       setPrompt('');
       setReferences([]);
       notify('ok', '任务已提交，正在生成…');
+      // 提交即扣费，刷新余额
+      void refreshMe();
     } catch (e) {
       setTasks((prev) => prev.filter((x) => x.id !== tempId));
       const msg =
@@ -330,7 +506,7 @@ export default function App() {
     } finally {
       setSubmitting(false);
     }
-  }, [prompt, selectedId, references, params, models, notify]);
+  }, [prompt, selectedId, references, params, models, notify, refreshMe]);
 
   // ---------------- 结果操作 ----------------
   const onRegenerate = useCallback(
@@ -405,11 +581,14 @@ export default function App() {
       <TopBar
         active={activeTab}
         onTab={setActiveTab}
-        credits={58.1}
+        credits={credits}
         offline={offlineMode}
+        userLabel={userLabel}
+        onAuth={handleAuthButton}
         onAssets={() => notify('ok', '素材库：建设中')}
         onGallery={() => notify('ok', '画廊：建设中')}
         onSettings={() => notify('ok', '设置：建设中')}
+        onBatch={() => setBatchOpen(true)}
       />
 
       <div className="app__body">
@@ -420,7 +599,7 @@ export default function App() {
           loading={catalogLoading}
           query={query}
           onQuery={setQuery}
-          credits={58.1}
+          credits={credits}
         />
 
         <main className="app__center">
@@ -429,6 +608,8 @@ export default function App() {
             onRegenerate={onRegenerate}
             onDelete={onDelete}
             onCancel={onCancel}
+            onReverse={(t) => void handleReverse(t)}
+            onPublish={(t) => void handlePublish(t)}
           />
 
           <Composer
@@ -441,6 +622,8 @@ export default function App() {
             submitting={submitting}
             estCredits={estCredits}
             onNotify={notify}
+            onRequireAuth={() => setAuthOpen(true)}
+            onCharged={() => void refreshMe()}
           />
         </main>
 
@@ -459,6 +642,24 @@ export default function App() {
           {toast.text}
         </div>
       )}
+
+      {batchOpen && (
+        <BatchPanel
+          aspectRatio={params.aspectRatio}
+          resolution={params.resolution}
+          maxConcurrency={maxConcurrency}
+          busy={batchBusy}
+          onClose={() => setBatchOpen(false)}
+          onRun={(cfg) => void runBatch(cfg)}
+        />
+      )}
+
+      <AuthDialog
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        onAuthed={() => void refreshMe()}
+        onNotify={notify}
+      />
     </div>
   );
 }

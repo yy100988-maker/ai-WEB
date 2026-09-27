@@ -37,6 +37,8 @@ export interface CreateTaskInput {
   inputAssetIds: string[];
   params: Record<string, string | number | boolean | string[]>;
   idempotencyKey: string;
+  /** F5 批量生成分组键（R1，方案 §7）：`b_...`，可选；仅展示/分组语义，不参与计费 */
+  batchId?: string;
   /** 仅非生产环境：Mock 失败注入透传（X-Mock-Fail） */
   mockFail?: string;
 }
@@ -90,6 +92,9 @@ async function resolveAssetIds(ids: string[], userId: string): Promise<string[]>
 
 function serializeTaskListRow(t: TaskWithModel, modelDisplayName: string) {
   return {
+    prompt: t.prompt,
+    params: t.params,
+    batchId: t.batchId,
     id: t.publicId,
     status: t.status,
     progress: t.progress,
@@ -236,6 +241,7 @@ export const taskService = {
             progress: 0,
             prompt: input.prompt,
             negativePrompt: input.negativePrompt ?? null,
+            batchId: input.batchId ?? null,
             params: storedParams,
             inputAssetIds: resolvedAssetIds,
             priceSnapshot: {
@@ -349,6 +355,11 @@ export const taskService = {
       progress: task.progress,
       capability: task.capability,
       model: { id: task.modelId, displayName: task.model?.displayName ?? '' },
+      // prompt/batchId 必须随 detail 下发：前端 hydrate 用 {...item, ...extra} 合并，
+      // extra.prompt 为 undefined 会把列表行自带的 prompt 覆盖掉 ——
+      // 2026-09-23 线上全行"该记录没有存储提示词"的根因（详情序列化器漏了 prompt）。
+      prompt: task.prompt,
+      batchId: task.batchId,
       params: task.params,
       inputAssetIds: task.inputAssetIds,
       quotedCredits: task.quotedCredits,

@@ -49,16 +49,84 @@ export function setOfflineMode(v: boolean): void {
   offlineMode = v;
 }
 
+const LS_ACCESS = 'vutu_access_token';
+const LS_REFRESH = 'vutu_refresh_token';
+
 let accessToken: string | null = null;
+let refreshToken: string | null = null;
+let refreshInFlight: Promise<void> | null = null;
+
 export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+/** 从 localStorage 恢复会话（应用启动时调用一次） */
+export function restoreSession(): boolean {
+  try {
+    const a = localStorage.getItem(LS_ACCESS);
+    const r = localStorage.getItem(LS_REFRESH);
+    if (a) accessToken = a;
+    if (r) refreshToken = r;
+    return Boolean(a);
+  } catch {
+    return false;
+  }
+}
+
+/** 保存 token 对（登录/注册/刷新成功后调用） */
+export function saveSession(tokens: { accessToken: string; refreshToken: string }): void {
+  accessToken = tokens.accessToken;
+  refreshToken = tokens.refreshToken;
+  try {
+    localStorage.setItem(LS_ACCESS, tokens.accessToken);
+    localStorage.setItem(LS_REFRESH, tokens.refreshToken);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+}
+
+/** 清除会话（登出时调用） */
+export function clearSession(): void {
+  accessToken = null;
+  refreshToken = null;
+  try {
+    localStorage.removeItem(LS_ACCESS);
+    localStorage.removeItem(LS_REFRESH);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+export function isLoggedIn(): boolean {
+  return accessToken !== null;
+}
+
+/** 用 refreshToken 轮换一次 token 对；并发请求共用同一个 in-flight promise */
+async function refreshSession(): Promise<void> {
+  if (!refreshToken) throw new ApiError('UNAUTHORIZED', '请先登录', 401);
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const data = await rawRequest<{ accessToken: string; refreshToken: string }>(
+        '/v1/auth/refresh',
+        { method: 'POST', body: JSON.stringify({ refreshToken }) },
+      );
+      saveSession(data);
+    })();
+    try {
+      await refreshInFlight;
+    } finally {
+      refreshInFlight = null;
+    }
+  } else {
+    await refreshInFlight;
+  }
+}
+
 /**
- * 统一请求。失败时抛 ApiError（含后端 code），网络异常抛 ApiError('NETWORK_ERROR')。
- * 返回裸 data 字段（已剥掉 envelope）。
+ * 底层请求（无 401 重试）。失败时抛 ApiError（含后端 code），
+ * 网络异常抛 ApiError('NETWORK_ERROR')。返回裸 data 字段（已剥掉 envelope）。
  */
-async function request<T>(
+async function rawRequest<T>(
   path: string,
   init: RequestInit & { query?: Record<string, string | number | undefined> } = {},
 ): Promise<T> {
@@ -107,6 +175,29 @@ async function request<T>(
 
   setOfflineMode(false);
   return body.data as T;
+}
+
+/**
+ * 统一请求：rawRequest + 401 时自动 refresh 重试一次。
+ * 刷新路径自身（/v1/auth/refresh）不重试，避免死循环。
+ */
+async function request<T>(
+  path: string,
+  init: RequestInit & { query?: Record<string, string | number | undefined> } = {},
+): Promise<T> {
+  try {
+    return await rawRequest<T>(path, init);
+  } catch (e) {
+    const unauthorized = e instanceof ApiError && (e.code === 'UNAUTHORIZED' || e.status === 401);
+    if (!unauthorized || path === '/v1/auth/refresh' || !refreshToken) throw e;
+    try {
+      await refreshSession();
+    } catch {
+      clearSession();
+      throw e;
+    }
+    return rawRequest<T>(path, init);
+  }
 }
 
 // ------------------------------------------------------------------ 类型
@@ -309,11 +400,52 @@ export const api = {
     inputAssetIds?: string[];
     params?: Record<string, unknown>;
     idempotencyKey: string;
+    /** F5 批量分组键（方案 §7）：`b_...`，可选；仅展示/分组语义，不参与计费 */
+    batchId?: string;
   }) =>
     request<{ task: TaskSummary }>('/v1/tasks', {
       method: 'POST',
       body: JSON.stringify(body),
       headers: { 'Idempotency-Key': body.idempotencyKey },
+    }),
+
+  /** F1 提示词优化（决议 D1：charge-after 扣积分；键每次点击独立，网络重试不重复扣） */
+  optimizePrompt: (prompt: string) =>
+    request<{ optimized: string; credits: number; latencyMs: number }>('/v1/prompts/optimize', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+    }),
+
+  /** F2 反推提示词（图片 → 提示词；charge-after 同 F1） */
+  reversePrompt: (assetId: string) =>
+    request<{ prompt: string; assetId: string; credits: number; latencyMs: number }>(
+      '/v1/prompts/reverse',
+      {
+        method: 'POST',
+        body: JSON.stringify({ assetId }),
+        headers: { 'Idempotency-Key': newIdempotencyKey() },
+      },
+    ),
+
+  /** F3 兑换码（条件更新防双花 → grant type=promo） */
+  redeemKey: (code: string) =>
+    request<{ credits: number; balanceAfter: number }>('/v1/billing/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  /** 提示词库列表（F4 发布时选 tab；匿名可读） */
+  promptLibrary: () =>
+    request<{ tabs: Array<{ id: string; labelI18n?: Record<string, string> }>; cards: unknown[] }>(
+      '/v1/prompt-library',
+    ),
+
+  /** F4 发布到灵感广场（决议 D3：PROMPT_AUTO_APPROVE 缺省 true 即 published） */
+  publishPost: (body: { tabCode: string; title: string; assetId: string }) =>
+    request<{ publicId: string; status: string }>('/v1/prompt-library', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 
   /** 创作记录 */
@@ -350,12 +482,81 @@ export const api = {
   /** 我的余额与并发 */
   me: () =>
     request<{
-      publicId: string;
-      email: string;
-      planCode: string;
-      credits: number;
-      maxConcurrency: number;
-    }>('/v1/users/me'),
+      user: {
+        publicId: string;
+        email: string | null;
+        phone: string | null;
+        displayName: string | null;
+        planCode: string;
+        plan: { code: string; maxConcurrency: number };
+      };
+      balance: { credits: number; expiringSoon: number };
+    }>('/v1/auth/me'),
+
+  /** 注册第一步：发验证码 → { verificationId, expiresInSec } */
+  register: (body: { email: string }) =>
+    request<{ verificationId: string; expiresInSec: number }>('/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** 注册第二步：校验码 → { exists } 或 { verifiedToken, expiresInSec } */
+  verify: (body: { verificationId: string; code: string }) =>
+    request<{ exists: boolean; verifiedToken?: string; expiresInSec?: number }>(
+      '/v1/auth/verify',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
+  /** 注册第三步：凭 verifiedToken 设密码 → 建号 + token 对 */
+  setPassword: (body: { verifiedToken: string; password: string }) =>
+    request<{ user: unknown; accessToken: string; refreshToken: string }>(
+      '/v1/auth/set-password',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
+  /** 密码登录 → { user, accessToken, refreshToken } */
+  login: (body: { email: string; password: string }) =>
+    request<{ user: unknown; accessToken: string; refreshToken: string }>('/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** 登出（幂等，需登录态保存的 refreshToken） */
+  logout: () => {
+    const body = refreshToken ? { refreshToken } : { refreshToken: 'none' };
+    clearSession();
+    if (body.refreshToken === 'none') return Promise.resolve({ revoked: true });
+    return rawRequest<{ revoked: boolean }>('/v1/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }).catch(() => ({ revoked: true }));
+  },
+
+  /** 申请直传 URL → { assetId, uploadUrl, requiredHeaders, expiresInSec } */
+  requestUploadUrl: (body: { mimeType: string; sizeBytes: number; filename?: string }) =>
+    request<{
+      assetId: string;
+      uploadUrl: string;
+      requiredHeaders: Record<string, string>;
+      expiresInSec: number;
+    }>('/v1/assets/upload-url', {
+      method: 'POST',
+      body: JSON.stringify({ ...body, kind: 'upload' }),
+    }),
+
+  /** 确认直传完成 → { asset }（后端 headObject + 异步魔数校验） */
+  confirmAsset: (assetId: string) =>
+    request<{ asset: AssetItem }>('/v1/assets', {
+      method: 'POST',
+      body: JSON.stringify({ assetId }),
+    }),
+
+  /** 以链接导入参考图（服务端拉取，SSRF 防护） */
+  importAssetUrl: (url: string) =>
+    request<{ asset?: AssetItem; assetId?: string; status?: string }>('/v1/assets/import-url', {
+      method: 'POST',
+      body: JSON.stringify({ url, kind: 'upload', mediaType: 'image' }),
+    }),
 };
 
 /**
@@ -423,6 +624,35 @@ export function matchPrice(
   const rand = crypto.getRandomValues(new Uint8Array(16));
   const hex = Array.from(rand, (b) => b.toString(16).padStart(2, '0')).join('');
   return `idem_${hex}`;
+}
+
+/**
+ * 直传一张参考图：申请 upload-url → PUT 到对象存储 → 确认。
+ * 返回后端 assetId（图生图的 inputAssetIds 就用它）。
+ *  image/gif 不在白名单也由后端 validateUploadRequest 拒绝，这里只做大小兜底（100MB）。
+ */
+export async function uploadImageFile(file: File): Promise<{ assetId: string }> {
+  if (file.size > 100 * 1024 * 1024) {
+    throw new ApiError('FILE_TOO_LARGE', '图片超过 100MB', 0);
+  }
+  const { assetId, uploadUrl, requiredHeaders } = await api.requestUploadUrl({
+    mimeType: file.type || 'application/octet-stream',
+    sizeBytes: file.size,
+    filename: file.name,
+  });
+  let put: Response;
+  try {
+    put = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', ...requiredHeaders },
+      body: file,
+    });
+  } catch (e) {
+    throw new ApiError('NETWORK_ERROR', '直传失败，请重试', 0, e);
+  }
+  if (!put.ok) throw new ApiError('UPLOAD_FAILED', `直传失败（HTTP ${put.status}）`, put.status);
+  await api.confirmAsset(assetId);
+  return { assetId };
 }
 
 /**

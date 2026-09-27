@@ -4,8 +4,9 @@
  * 搜索框 + 模型卡片列表。每张卡片：图标色块 + 展示名 + 副标题 + 百分比容量 + 可选 NEW 角标。
  * 激活项带 teal 淡底与左侧色条。
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { CatalogModel } from '../lib/api';
+import { ApiError, api } from '../lib/api';
 import { IconSearch } from './icons';
 
 interface Props {
@@ -15,7 +16,9 @@ interface Props {
   loading: boolean;
   query: string;
   onQuery: (q: string) => void;
-  credits: number;
+  credits: number | null;
+  /** F3 兑换成功 → 上游刷新余额 */
+  onRedeemed?: () => void;
 }
 
 /** 稳定派生：按模型 id 生成一套柔和的图标底色（与 V2 效果图的多彩小块一致） */
@@ -29,7 +32,32 @@ export function ModelRail({
   query,
   onQuery,
   credits,
+  onRedeemed,
 }: Props) {
+  const [redeemInput, setRedeemInput] = useState('');
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemMsg, setRedeemMsg] = useState<string | null>(null);
+
+  const doRedeem = async (): Promise<void> => {
+    const code = redeemInput.trim();
+    if (!code || redeemBusy) return;
+    setRedeemBusy(true);
+    setRedeemMsg(null);
+    try {
+      const out = await api.redeemKey(code);
+      setRedeemInput('');
+      setRedeemMsg(`兑换成功 +${out.credits}`);
+      onRedeemed?.();
+    } catch (e) {
+      setRedeemMsg(
+        e instanceof ApiError ? (e.code === 'NOT_FOUND' ? '兑换码不存在' : e.message) : '兑换失败',
+      );
+    } finally {
+      setRedeemBusy(false);
+      window.setTimeout(() => setRedeemMsg(null), 4000);
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return models;
@@ -93,8 +121,35 @@ export function ModelRail({
       <div className="rail__footer">
         <span className="rail__balance">
           <span className="rail__balance-label">余额</span>
-          <span className="rail__balance-value">{credits.toFixed(2)}</span>
+          <span className="rail__balance-value">
+            {credits === null ? '未登录' : credits.toFixed(2)}
+          </span>
         </span>
+        {credits !== null && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <input
+              type="text"
+              className="rail__search-input"
+              placeholder="兑换码"
+              value={redeemInput}
+              onChange={(e) => setRedeemInput(e.target.value)}
+              aria-label="兑换码"
+            />
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={redeemBusy || redeemInput.trim().length === 0}
+              onClick={() => void doRedeem()}
+            >
+              <span>{redeemBusy ? '…' : '兑换'}</span>
+            </button>
+          </div>
+        )}
+        {redeemMsg && (
+          <p className="rail__hint" style={{ marginTop: 6 }}>
+            {redeemMsg}
+          </p>
+        )}
       </div>
     </aside>
   );

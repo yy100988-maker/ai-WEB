@@ -17,13 +17,10 @@ import {
   Languages,
   Loader2,
   Music,
-  Pencil,
   Plus,
-  RefreshCw,
   Scissors,
   Shapes,
   Sparkles,
-  Trash2,
   Undo2,
   User,
   X,
@@ -33,17 +30,18 @@ import type { Locale } from "./site-data";
 import { DEFAULT_WORKS_I18N, LOCALES, siteContent } from "./site-data";
 // F5 个人中心「我的作品」：作品网格 + 分类/日期筛选 + 批量操作 + 大图预览
 import { WorksGallery } from "./WorksGallery";
-// F4 内容区：资产视图 / 模板数据源（?prompt=&img= 解析逻辑不动）
+// F4 内容区（?prompt=&img= 解析逻辑不动；资产视图已下线，见 2026-09-24(9)）
 // 创作记录已迁至「我的作品」（WorksGallery），工作台不再引用 CreationRecords
-import { AssetsGrid } from "./AssetsGrid";
-import { AppQuickTemplates } from "./AppQuickTemplates";
+// 右侧任务列表（对齐 nova 参考图），取代旧 ResultPane 单大图预览
+import { TaskListPane } from "./TaskListPane";
 // F3 计费展示：侧栏订阅名/积分/签到 + 通知未读数（共享层直接复用，不另起炉灶）
 import { AuthProvider, useAuth } from "@/lib/api/auth-context";
 // F2 生成链路：任务提交/SSE 进度 + 模型/报价（与 Hero/Tool 共用 useTaskRunner，不另写一套）
 import { useTaskRunner } from "@/lib/api/use-task-runner";
-import { assetsApi, billingApi, catalogApi, notificationsApi } from "@/lib/api/resources";
+import { assetsApi, billingApi, catalogApi, promptsApi } from "@/lib/api/resources";
 import type { CatalogModel, ModelDetail, ModelParamOption, SubscriptionData } from "@/lib/api/types";
 import { AuthDialog } from "./AuthDialog";
+import { errCode, pickFeature } from "./feature-ui";
 
 interface Props {
   locale: Locale;
@@ -59,7 +57,6 @@ type View =
   | "viral"
   | "avatar"
   | "translate"
-  | "assets"
   | "works"
   | "explore"
   | "support"
@@ -136,370 +133,129 @@ function pickDefault(opts: string[], optDef: ModelParamOption | undefined, prici
 }
 
 /**
- * 结果媒体块：按 mimeType 分发图片 / 视频 / 音频 / 占位。
- *
- * 单张与网格共用同一组件，只是外层给的尺寸类不同（铺满 vs 方格）。
- * 图片类可点击放大（onOpen）。
+ * 工作台内嵌控件文案（结果卡/灯箱/工具栏等原本写死中文 —— UI-DIFF P1-6：
+ * `/en/app` 混入简中、zh-TW 页混入简体）。en 为缺省，ja/de/… 回落 en。
  */
-function ResultMedia({
-  r,
-  prompt,
-  className,
-  onOpen,
-}: {
-  r: { assetId: string; url: string | null; mimeType: string };
-  prompt: string;
-  className?: string;
-  onOpen?: () => void;
-}) {
-  if (r.url && r.mimeType.startsWith("video/")) {
-    return (
-      <video
-        src={r.url}
-        controls
-        playsInline
-        preload="metadata"
-        className={`w-full bg-black object-contain ${className ?? ""}`}
-      />
-    );
-  }
-
-  if (r.url && r.mimeType.startsWith("audio/")) {
-    return (
-      <div className="flex items-center justify-center bg-black/[0.03] px-6 py-8">
-        <audio src={r.url} controls className="w-full max-w-md" />
-      </div>
-    );
-  }
-
-  if (r.url) {
-    return (
-      <button
-        type="button"
-        onClick={onOpen}
-        title="点击查看大图"
-        className={`group relative block w-full cursor-zoom-in bg-black/[0.03] ${className ?? ""}`}
-      >
-        {/* 预签名远端 URL：不走 next/image（免配 remotePatterns） */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={r.url} alt={prompt} className="size-full object-cover" />
-        {/* 悬停提示：放大查看 */}
-        <span className="pointer-events-none absolute inset-0 hidden items-center justify-center bg-black/25 text-xs font-semibold text-white group-hover:flex">
-          查看大图
-        </span>
-      </button>
-    );
-  }
-
-  return (
-    <div className="flex min-h-[10rem] items-center justify-center bg-black/[0.03] px-6 py-10 text-center">
-      <div>
-        <p className="text-sm font-bold text-black/70">创作完成</p>
-        <p className="mt-1 text-xs text-black/45">结果预览暂时不可用（可到「我的作品」查看）</p>
-      </div>
-    </div>
-  );
+interface WorkbenchUi {
+  viewLarge: string;
+  zoomTitle: string;
+  done: string;
+  previewOff: string;
+  previewOffShort: string;
+  transferring: string;
+  generating: string;
+  count: string; // {n} 张
+  reedit: string;
+  regen: string;
+  del: string;
+  emptyTitle: string;
+  emptyBody: string;
+  tryExample: string;
+  closePreview: string;
+  prev: string;
+  next: string;
+  resultPreview: string;
+  download: string;
+  newChat: string;
+  canvas: string;
+  editor: string;
+  refImportFail: string;
+  uploadRef: string;
+  refImg: string;
+  checkin: string;
 }
 
-/**
- * 工作台右侧「结果区」。
- *
- * 展示形式对齐产品参考图：**生成记录卡片列表**，每条记录包含
- *   - 结果预览（图片直接铺满，视频/音频用播放器）
- *   - 提示词
- *   - 参数标签（比例 / 分辨率 / 画质等）
- *   - 操作行（重新编辑 / 再次生成 / 删除）+ 时间戳
- * 生成中显示进度条，未生成时显示引导态与示例。
- */
-function ResultPane({
-  busy,
-  progress,
-  taskStatus,
-  resultUrl,
-  results,
-  prompt,
-  paramTags,
-  onReuse,
-  onClear,
-  onPickExample,
-  stamp,
-}: {
-  busy: boolean;
-  progress: number;
-  taskStatus?: string;
-  resultUrl: string | null;
-  /** 全部结果（批量出图时可能多张），每个已解析出可访问 URL */
-  results: Array<{ assetId: string; url: string | null; mimeType: string }>;
-  prompt: string;
-  /** 本次生成使用的参数标签（如 ["分辨率：1K", "画质：high"]） */
-  paramTags: string[];
-  onReuse: () => void;
-  onClear: () => void;
-  onPickExample: (p: string) => void;
-  /** 生成完成时间戳，由父组件在任务成功时写入（避免 effect 内 setState） */
-  stamp: string;
-}) {
-  const EXAMPLES = [
-    { img: "/sites/vutu/showcase/row-06.png", t: "Product Impact" },
-    { img: "/sites/vutu/showcase/row-01.png", t: "Shoot from Every Angle" },
-    { img: "/sites/vutu/showcase/row-05.jpg", t: "Turn Story into Video" },
-  ];
+const WORKBENCH_UI: Record<"en" | "zh-TW" | "zh-CN", WorkbenchUi> = {
+  en: {
+    viewLarge: "View large",
+    zoomTitle: "Click to view large",
+    done: "Creation finished",
+    previewOff: "Preview unavailable (check My Works)",
+    previewOffShort: "Preview unavailable",
+    transferring: "Persisting…",
+    generating: "Generating…",
+    count: "{n} images",
+    reedit: "Re-edit",
+    regen: "Regenerate",
+    del: "Delete",
+    emptyTitle: "Describe what you want, then hit create",
+    emptyBody: "Your result will appear here",
+    tryExample: "Try an example",
+    closePreview: "Close preview",
+    prev: "Previous",
+    next: "Next",
+    resultPreview: "Result preview",
+    download: "Download original",
+    newChat: "New chat",
+    canvas: "Canvas",
+    editor: "Editor",
+    refImportFail: "Failed to import the reference image",
+    uploadRef: "Upload a reference image",
+    refImg: "Reference image",
+    checkin: "Check in",
+  },
+  "zh-TW": {
+    viewLarge: "查看大圖",
+    zoomTitle: "點擊查看大圖",
+    done: "創作完成",
+    previewOff: "結果預覽暫時不可用（可到「我的作品」查看）",
+    previewOffShort: "結果預覽暫時不可用",
+    transferring: "轉存中…",
+    generating: "正在生成…",
+    count: "{n} 張",
+    reedit: "重新編輯",
+    regen: "再次生成",
+    del: "刪除",
+    emptyTitle: "描述你想要的內容，點擊生成",
+    emptyBody: "結果會顯示在這裡",
+    tryExample: "試試範例",
+    closePreview: "關閉預覽",
+    prev: "上一張",
+    next: "下一張",
+    resultPreview: "結果預覽",
+    download: "下載原圖",
+    newChat: "新聊天",
+    canvas: "畫布",
+    editor: "編輯器",
+    refImportFail: "參考圖匯入失敗",
+    uploadRef: "上傳參考圖",
+    refImg: "參考圖",
+    checkin: "簽到",
+  },
+  "zh-CN": {
+    viewLarge: "查看大图",
+    zoomTitle: "点击查看大图",
+    done: "创作完成",
+    previewOff: "结果预览暂时不可用（可到「我的作品」查看）",
+    previewOffShort: "结果预览暂时不可用",
+    transferring: "转存中…",
+    generating: "正在生成…",
+    count: "{n} 张",
+    reedit: "重新编辑",
+    regen: "再次生成",
+    del: "删除",
+    emptyTitle: "描述你想要的内容，点击生成",
+    emptyBody: "结果会显示在这里",
+    tryExample: "试试示例",
+    closePreview: "关闭预览",
+    prev: "上一张",
+    next: "下一张",
+    resultPreview: "结果预览",
+    download: "下载原图",
+    newChat: "新聊天",
+    canvas: "画布",
+    editor: "编辑器",
+    refImportFail: "参考图导入失败",
+    uploadRef: "上传参考图",
+    refImg: "参考图",
+    checkin: "签到",
+  },
+};
 
-  const shown = results.length > 0 ? results : resultUrl ? [{ assetId: "", url: resultUrl, mimeType: "" }] : [];
-
-  /** 大图预览：记录当前查看的索引，null = 关闭 */
-  const [lightbox, setLightbox] = useState<number | null>(null);
-
-  // 大图预览：Esc 关闭 + 锁定背景滚动，避免滚轮穿透
-  useEffect(() => {
-    if (lightbox === null) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setLightbox(null);
-      if (e.key === "ArrowRight") setLightbox((i) => (i === null ? i : (i + 1) % shown.length));
-      if (e.key === "ArrowLeft") setLightbox((i) => (i === null ? i : (i - 1 + shown.length) % shown.length));
-    }
-    document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [lightbox, shown.length]);
-
-  const current = lightbox !== null ? shown[lightbox] : undefined;
-
-  return (
-    <div className="space-y-4">
-      {/* 生成中：进度条（含转存中态，避免 succeeded 后空结果时闪回引导态） */}
-      {busy && (
-        <div className="rounded-2xl border border-black/10 bg-white p-5">
-          <div className="flex items-center gap-2.5">
-            <Loader2 className="size-4 animate-spin text-[#1f11ed]" />
-            <p className="text-sm font-semibold text-black/75">
-              {taskStatus === "succeeded" && progress >= 99 ? "转存中…" : "正在生成…"}
-            </p>
-          </div>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/10">
-            <div
-              className="h-full rounded-full bg-[#1f11ed] transition-all"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <p className="mt-1.5 text-right text-[11px] text-black/45">{progress}%</p>
-        </div>
-      )}
-
-      {/* 生成记录卡片：一次生成 = 一张记录卡；多张结果在卡内以网格排布，
-          不再每张结果各占一张卡（旧版会把同一批出图拆成多张重复了
-          提示词/参数/操作行的卡）。 */}
-      {!busy && shown.length > 0 && (
-        <div className="overflow-hidden rounded-2xl border border-black/10 bg-white">
-          {/* 结果预览：单张铺满；多张按数量自适应网格 */}
-          {shown.length === 1 && shown[0] ? (
-            <ResultMedia
-              r={shown[0]}
-              prompt={prompt}
-              className="max-h-[26rem]"
-              onOpen={() => setLightbox(0)}
-            />
-          ) : (
-            <div
-              className={`grid gap-px bg-black/10 ${
-                shown.length === 2 ? "grid-cols-2" : shown.length <= 4 ? "grid-cols-2" : "grid-cols-3"
-              }`}
-            >
-              {shown.map((r, i) => (
-                <ResultMedia
-                  key={r.assetId || i}
-                  r={r}
-                  prompt={prompt}
-                  className="aspect-square max-h-[18rem]"
-                  onOpen={() => setLightbox(i)}
-                />
-              ))}
-            </div>
-          )}
-
-          <div className="p-4">
-            {/* 提示词 */}
-            {prompt && <p className="text-sm font-semibold text-black/85">{prompt}</p>}
-
-            {/* 参数标签 */}
-            {paramTags.length > 0 && (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {paramTags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-medium text-black/60"
-                  >
-                    {tag}
-                  </span>
-                ))}
-                {/* 多张结果时补一条张数标签，说明这是一批出图 */}
-                {shown.length > 1 && (
-                  <span className="rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-medium text-black/60">
-                    {shown.length} 张
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* 操作行 */}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={onReuse}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-black/5 px-3 py-1.5 text-xs font-medium text-black/70 hover:bg-black/10"
-              >
-                <Pencil className="size-3.5" />
-                重新编辑
-              </button>
-              <button
-                type="button"
-                onClick={onReuse}
-                disabled={busy || !prompt.trim()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-black/5 px-3 py-1.5 text-xs font-medium text-black/70 hover:bg-black/10 disabled:opacity-40"
-              >
-                <RefreshCw className="size-3.5" />
-                再次生成
-              </button>
-              <button
-                type="button"
-                onClick={onClear}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-black/5 px-3 py-1.5 text-xs font-medium text-black/70 hover:bg-black/10"
-              >
-                <Trash2 className="size-3.5" />
-                删除
-              </button>
-              <span className="ml-auto text-[11px] text-black/40">{stamp}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 引导态（未生成且未在生成） */}
-      {!busy && shown.length === 0 && (
-        <div className="flex aspect-video items-center justify-center overflow-hidden rounded-2xl border border-dashed border-black/15 bg-black/[0.02]">
-          <div className="text-center">
-            <p className="text-sm font-semibold text-black/45">描述你想要的内容，点击生成</p>
-            <p className="mt-1 text-xs text-black/35">结果会显示在这里</p>
-          </div>
-        </div>
-      )}
-
-      {/* 示例（未输入且未生成时） */}
-      {!prompt && !busy && shown.length === 0 && (
-        <div>
-          <p className="mb-3 text-xs font-medium text-black/45">Try an example</p>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex.t}
-                type="button"
-                onClick={() => onPickExample(ex.t)}
-                className="flex shrink-0 items-center gap-2 rounded-xl border border-black/10 bg-white px-3 py-2 hover:bg-black/5"
-              >
-                <div className="relative size-8 overflow-hidden rounded-lg">
-                  <Image src={ex.img} alt="" fill sizes="32px" className="object-cover" />
-                </div>
-                <span className="text-xs font-medium text-black/70">{ex.t}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 大图预览（Lightbox）：点击结果图放大查看，支持 ← → 切换、Esc 关闭 */}
-      {current && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="结果预览"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          onClick={() => setLightbox(null)}
-        >
-          {/* 关闭 */}
-          <button
-            type="button"
-            aria-label="关闭预览"
-            onClick={() => setLightbox(null)}
-            className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-          >
-            <X className="size-5" />
-          </button>
-
-          {/* 上一张 / 下一张（仅多张时显示） */}
-          {shown.length > 1 && (
-            <>
-              <button
-                type="button"
-                aria-label="上一张"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setLightbox((i) => (i === null ? i : (i - 1 + shown.length) % shown.length));
-                }}
-                className="absolute left-3 rounded-full bg-white/10 p-2.5 text-white hover:bg-white/20"
-              >
-                <ChevronDown className="size-5 rotate-90" />
-              </button>
-              <button
-                type="button"
-                aria-label="下一张"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setLightbox((i) => (i === null ? i : (i + 1) % shown.length));
-                }}
-                className="absolute right-3 rounded-full bg-white/10 p-2.5 text-white hover:bg-white/20"
-              >
-                <ChevronDown className="size-5 -rotate-90" />
-              </button>
-            </>
-          )}
-
-          {/* 媒体本体：点内容不关闭 */}
-          <div className="max-h-full max-w-5xl" onClick={(e) => e.stopPropagation()}>
-            {current.url && current.mimeType.startsWith("video/") ? (
-              <video
-                src={current.url}
-                controls
-                autoPlay
-                playsInline
-                className="max-h-[85vh] w-auto rounded-xl bg-black"
-              />
-            ) : current.url ? (
-              // 预签名远端 URL：不走 next/image（免配 remotePatterns）
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={current.url}
-                alt={prompt}
-                className="max-h-[85vh] w-auto rounded-xl object-contain"
-              />
-            ) : (
-              <p className="rounded-xl bg-white/10 px-6 py-8 text-sm text-white/80">
-                结果预览暂时不可用
-              </p>
-            )}
-
-            {/* 计数 + 下载 */}
-            <div className="mt-3 flex items-center justify-center gap-3 text-xs text-white/70">
-              {shown.length > 1 && <span>{lightbox! + 1} / {shown.length}</span>}
-              {current.url && (
-                <a
-                  href={current.url}
-                  download
-                  onClick={(e) => e.stopPropagation()}
-                  className="rounded-full bg-white/10 px-3 py-1 hover:bg-white/20"
-                >
-                  下载原图
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function pickWorkbenchUi(locale: string): WorkbenchUi {
+  if (locale === "zh-TW") return WORKBENCH_UI["zh-TW"];
+  if (locale === "zh-CN") return WORKBENCH_UI["zh-CN"];
+  return WORKBENCH_UI.en;
 }
 
 // chip 标签（如 "10s" / "10秒"）解析出秒数，按契约映射为 durationSec。
@@ -603,6 +359,16 @@ function ParamDropdown({
 function AppHomePageInner({ locale, base }: Props) {
   const dict = siteContent[locale];
   const a = dict.app;
+  // 内嵌控件文案（结果卡/灯箱/工具栏），按 locale 取 —— 修 UI-DIFF P1-6 语言串台
+  const ui = pickWorkbenchUi(locale);
+  const f = pickFeature(locale);
+
+  // F1 优化 / F3 兑换（决议 D1：charge-after 扣积分，成功才扣、成败独立反馈）
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeErr, setOptimizeErr] = useState<string | null>(null);
+  const [redeemInput, setRedeemInput] = useState("");
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemMsg, setRedeemMsg] = useState<string | null>(null);
   // 「我的作品」文案：字典缺省时回落内置中文（其余语言不必同步维护）
   const worksI18n = a.works ?? DEFAULT_WORKS_I18N;  const countdown = useCountdown();
   const [prompt, setPrompt] = useState("");
@@ -645,6 +411,29 @@ function AppHomePageInner({ locale, base }: Props) {
   const [trBusy, setTrBusy] = useState(false);
   const [trProgress, setTrProgress] = useState(0);
 
+  /**
+   * 任务列表行「再次生成」：按该任务存的能力/模型/参数原样重跑。
+   * （prompt/params 由 TaskListPane 从 detail hydrate 后带过来）
+   */
+  function rerunFromRow(row: {
+    capability: string;
+    modelId: string;
+    prompt: string;
+    params: Record<string, string | number | boolean | string[]>;
+  }) {
+    if (user === null) {
+      setLoginOpen(true);
+      return;
+    }
+    setPrompt(row.prompt);
+    void run({
+      capability: row.capability,
+      modelId: row.modelId,
+      prompt: row.prompt,
+      params: row.params,
+    });
+  }
+
   const isTranslate = view === "translate";
   const baseCapability =
     view === "video" ? "text_to_video" : view === "image" ? "text_to_image" : "text_to_audio";
@@ -653,46 +442,16 @@ function AppHomePageInner({ locale, base }: Props) {
   const busy = isTranslate ? trBusy : taskRunning || importingRef;
   const progress = isTranslate ? trProgress : taskProgress;
 
-  /**
-   * 任务结果 → 带可访问 URL 的记录列表。
-   *
-   * ⚠️ `/v1/tasks/:id` 的 results **不下发 url**（只有 assetId + mimeType + 尺寸），
-   * 因为浏览 URL 是 15 分钟短时效预签名，必须按需签发。
-   * 早期前端直接读 `results[0].url` → 永远 undefined，结果区只能显示
-   * "创作完成 / 生成结果已准备好"占位卡，用户看不到图。
-   * 这里按 assetId 逐个取 viewUrl（与「我的作品」同一套 assetsApi.get）。
-   */
-  const [resultViews, setResultViews] = useState<
-    Array<{ assetId: string; url: string | null; mimeType: string }>
-  >([]);
-  /** 生成完成时间戳（任务成功时写入，供记录卡片展示） */
+  /** 生成完成时间戳（→ TaskListPane 的 refreshKey，任务完成即刷新列表） */
   const [resultStamp, setResultStamp] = useState("");
 
+  // viewUrl 签发已移交 TaskListPane（按行缓存、15min 时效、仅新行付费）；
+  // 这里只负责在任务出结果时打时间戳触发刷新。
   useEffect(() => {
-    if (taskResults.length === 0) {
-      setResultViews([]);
-      return;
+    if (taskResults.length > 0) {
+      setResultStamp(new Date().toLocaleString());
     }
-    setResultStamp(new Date().toLocaleString());
-    let alive = true;
-    void Promise.all(
-      taskResults.map(async (r) => {
-        try {
-          const d = await assetsApi.get(r.assetId);
-          return { assetId: r.assetId, url: d.viewUrl, mimeType: r.mimeType };
-        } catch {
-          return { assetId: r.assetId, url: null, mimeType: r.mimeType };
-        }
-      }),
-    ).then((rows) => {
-      if (alive) setResultViews(rows);
-    });
-    return () => {
-      alive = false;
-    };
   }, [taskResults]);
-
-  const resultUrl = resultViews[0]?.url ?? null;
 
   /**
    * 参数标签文案。
@@ -712,28 +471,13 @@ function AppHomePageInner({ locale, base }: Props) {
     };
   })();
 
-  /**
-   * 记录卡片上的参数标签（对齐参考图的「图片比例 / 图片质量」样式）。
-   * 只展示当前模型实际有的维度，避免出现空标签。
-   */
-  const resultParamTags = (() => {
-    const tags: string[] = [];
-    if (resolution) tags.push(`${paramLabels.resolution}：${resolution}`);
-    if (size) tags.push(`${paramLabels.size}：${size}`);
-    if (ratio) tags.push(`${paramLabels.aspectRatio}：${ratio}`);
-    if (duration) tags.push(`${paramLabels.duration}：${duration}`);
-    if (quality) tags.push(`${paramLabels.quality}：${quality}`);
-    return tags;
-  })();
-
   // ---- F3 计费展示：订阅/积分/签到/未读数（未登录时全部回落 mock 外观） ----
   const { user, plan, credits, checkedInToday, checkin, refresh } = useAuth();
   const [sub, setSub] = useState<SubscriptionData | null>(null);
-  const [unread, setUnread] = useState(0);
   const [checkinBusy, setCheckinBusy] = useState(false);
   const [checkinErr, setCheckinErr] = useState<string | null>(null);
   // 字典 AppSection 无 checkin 字段，按任务要求回落双语文案
-  const checkinLabel = locale === "en" ? "Check in" : "签到";
+  const checkinLabel = ui.checkin;
   const pricingHref = base === "/" ? "/pricing" : `${base}/pricing`;
   const planName = sub?.planName ?? a.planName;
   const isPro = sub?.plan === "pro" || plan?.code === "pro";
@@ -758,38 +502,10 @@ function AppHomePageInner({ locale, base }: Props) {
     };
   }, [user]);
 
-  // 未读数轮询：登录后立即拉一次，之后每 60s 一次；未登录/失败归零不打断 UI
-  useEffect(() => {
-    if (!user) {
-      setUnread(0);
-      return;
-    }
-    let stop = false;
-    async function load(): Promise<void> {
-      try {
-        const r = await notificationsApi.unreadCount();
-        if (!stop) setUnread(r.count);
-      } catch {
-        /* 保持旧值，下次轮询再试 */
-      }
-    }
-    void load();
-    const id = setInterval(load, 60000);
-    return () => {
-      stop = true;
-      clearInterval(id);
-    };
-  }, [user]);
 
-  // 侧栏视图切换：点“资产”时顺手全部标已读并清零红点
+  // 侧栏视图切换（资产视图及未读红点已下线，见 2026-09-24(9)）
   function selectView(id: View) {
     setView(id);
-    if (id === "assets" && user && unread > 0) {
-      void notificationsApi
-        .markAllRead()
-        .then(() => setUnread(0))
-        .catch(() => undefined);
-    }
   }
 
   function doCheckin() {
@@ -801,13 +517,21 @@ function AppHomePageInner({ locale, base }: Props) {
       .then(() => setCheckinBusy(false))
       .catch((e: unknown) => {
         setCheckinBusy(false);
-        setCheckinErr(e instanceof Error ? e.message : "签到失败");
+        setCheckinErr(
+          e instanceof Error
+            ? e.message
+            : locale === "en"
+              ? "Check-in failed"
+              : locale === "zh-TW"
+                ? "簽到失敗"
+                : "签到失败",
+        );
       });
   }
 
   const VALID: View[] = [
     "video", "image", "audio", "canvas", "editor",
-    "viral", "avatar", "translate", "assets", "works", "explore", "support", "language",
+    "viral", "avatar", "translate", "works", "explore", "support", "language",
   ];
 
   useEffect(() => {
@@ -821,7 +545,7 @@ function AppHomePageInner({ locale, base }: Props) {
         const alias: Record<string, View> = {
           "ai-video": "video", "ai-image": "image", "ai-audio": "audio",
           "canvas": "canvas", "editor": "editor", "viral": "viral",
-          "avatar": "avatar", "translate": "translate", "assets": "assets",
+          "avatar": "avatar", "translate": "translate",
           "works": "works", "my-works": "works",
           "explore": "explore", "support": "support", "language": "language",
         };
@@ -971,6 +695,56 @@ function AppHomePageInner({ locale, base }: Props) {
     if (taskError && taskError.code === "UNAUTHORIZED") setLoginOpen(true);
   }, [taskError]);
 
+  // ---- F1 提示词优化（charge-after 扣积分 → refresh 刷余额；失败保留原文） ----
+  async function doOptimize(): Promise<void> {
+    if (optimizing) return;
+    if (user === null) {
+      setLoginOpen(true);
+      return;
+    }
+    const src = prompt.trim();
+    if (!src) {
+      setOptimizeErr(f.needPrompt);
+      return;
+    }
+    setOptimizing(true);
+    setOptimizeErr(null);
+    try {
+      const out = await promptsApi.optimize(src, crypto.randomUUID());
+      setPrompt(out.optimized.slice(0, 2000));
+      void refresh();
+    } catch (e) {
+      const code = errCode(e);
+      if (code === "UNAUTHORIZED") setLoginOpen(true);
+      else setOptimizeErr(f.optimizeFail);
+    } finally {
+      setOptimizing(false);
+    }
+  }
+
+  // ---- F3 兑换码（条件更新防双花 → grant promo；NOT_FOUND 单独提示防枚举顾虑由后端承担） ----
+  async function doRedeem(): Promise<void> {
+    const code = redeemInput.trim();
+    if (!code || redeemBusy) return;
+    if (user === null) {
+      setLoginOpen(true);
+      return;
+    }
+    setRedeemBusy(true);
+    setRedeemMsg(null);
+    try {
+      const out = await promptsApi.redeem(code);
+      setRedeemInput("");
+      setRedeemMsg(`${f.redeemOk} +${out.credits}`);
+      void refresh();
+    } catch (e) {
+      setRedeemMsg(errCode(e) === "NOT_FOUND" ? f.redeemInvalid : f.redeemFail);
+    } finally {
+      setRedeemBusy(false);
+      window.setTimeout(() => setRedeemMsg(null), 4000);
+    }
+  }
+
   // ---- F2：Create 真提交（假进度改为 run） ----
   async function handleCreate() {
     if (busy) return;
@@ -988,7 +762,9 @@ function AppHomePageInner({ locale, base }: Props) {
     if (quality) params.quality = quality;
     if (version) params.version = version;
     if (background) params.background = background;
-    // 深链 refImg：已是站内 assetId 直接用，否则先 import-url 转 assetId。
+    // 深链/模板 refImg 三态：ast_ 直用；**站内相对路径同源 fetch → 直传**（后端 import-url
+    // 只收绝对外链，相对路径会 UNFETCHABLE_URL —— 2026-09-24「商品图设计」模板报错根因，
+    // 亦覆盖提示词库深链 /api/v1/prompt-library/:id/image）；其余（http 外链）走 import-url。
     let inputAssetIds: string[] | undefined;
     if (view === "image" && refImg) {
       setRefErr(null);
@@ -997,11 +773,23 @@ function AppHomePageInner({ locale, base }: Props) {
       } else {
         setImportingRef(true);
         try {
-          const imported = await assetsApi.importUrl({ url: refImg, kind: "upload" });
-          inputAssetIds = [imported.assetId];
+          let assetId: string;
+          if (refImg.startsWith("/")) {
+            const res = await fetch(refImg);
+            if (!res.ok) throw new Error(ui.refImportFail);
+            const blob = await res.blob();
+            const name = refImg.split("/").pop() || "reference.png";
+            const file = new File([blob], name, { type: blob.type || "image/png" });
+            const confirmed = await assetsApi.uploadFile(file);
+            assetId = confirmed.asset.id;
+          } else {
+            const imported = await assetsApi.importUrl({ url: refImg, kind: "upload" });
+            assetId = imported.assetId;
+          }
+          inputAssetIds = [assetId];
         } catch (e) {
           setImportingRef(false);
-          setRefErr(e instanceof Error ? e.message : "参考图导入失败");
+          setRefErr(e instanceof Error && e.message ? e.message : ui.refImportFail);
           return;
         }
         setImportingRef(false);
@@ -1046,9 +834,9 @@ function AppHomePageInner({ locale, base }: Props) {
   const studioIcons = [Zap, User, Languages];
   const studioIds: View[] = ["viral", "avatar", "translate"];
   // 个人中心入口「我的作品」排在最前，其余保持原顺序（不破坏既有 1:1 还原）
-  const footIcons = [Sparkles, Folder, Compass, Headphones, Globe];
-  const footLabels = [worksI18n.menu, a.assets, a.explore, a.support, a.language];
-  const footIds: View[] = ["works", "assets", "explore", "support", "language"];
+  const footIcons = [Sparkles, Compass, Headphones, Globe];
+  const footLabels = [worksI18n.menu, a.explore, a.support, a.language];
+  const footIds: View[] = ["works", "explore", "support", "language"];
 
   const composerPh =
     view === "audio" ? a.audioPh : view === "image" ? dict.uploadHint : a.composerPh;
@@ -1171,13 +959,7 @@ function AppHomePageInner({ locale, base }: Props) {
 
           <nav className="mt-5 space-y-0.5 border-t border-black/10 pt-4">
             {footLabels.map((t, i) =>
-              // F3：资产项复用站内 emerald badge 展示未读数，不新增布局
-              sideBtn(
-                footIds[i],
-                t,
-                footIcons[i % footIcons.length],
-                footIds[i] === "assets" && unread > 0 ? String(unread) : undefined,
-              ),
+              sideBtn(footIds[i], t, footIcons[i % footIcons.length]),
             )}
           </nav>
 
@@ -1212,6 +994,27 @@ function AppHomePageInner({ locale, base }: Props) {
             {checkinErr && (
               <p className="mt-1 text-center text-[11px] text-red-500">{checkinErr}</p>
             )}
+            {user && (
+              <div className="mt-2 flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={redeemInput}
+                  onChange={(e) => setRedeemInput(e.target.value)}
+                  placeholder={f.redeemPlaceholder}
+                  aria-label={f.redeemLabel}
+                  className="min-w-0 flex-1 rounded-lg border border-black/10 bg-black/[0.02] px-2 py-1.5 text-xs outline-none focus:border-[#1f11ed]"
+                />
+                <button
+                  type="button"
+                  disabled={redeemBusy || redeemInput.trim().length === 0}
+                  onClick={() => void doRedeem()}
+                  className="shrink-0 rounded-lg bg-black/5 px-2.5 py-1.5 text-xs font-semibold text-black/70 hover:bg-black/10 disabled:opacity-40"
+                >
+                  {redeemBusy ? "…" : f.redeemBtn}
+                </button>
+              </div>
+            )}
+            {redeemMsg && <p className="mt-1 text-center text-[11px] text-black/55">{redeemMsg}</p>}
             {!isPro && (
               <Link
                 href={pricingHref}
@@ -1244,7 +1047,7 @@ function AppHomePageInner({ locale, base }: Props) {
                   className="inline-flex items-center gap-1.5 rounded-lg bg-black/5 px-3 py-1.5 text-xs font-medium text-black/70 hover:bg-black/10"
                 >
                   <Plus className="size-3.5" />
-                  新聊天
+                  {ui.newChat}
                 </button>
                 <button
                   type="button"
@@ -1256,11 +1059,11 @@ function AppHomePageInner({ locale, base }: Props) {
                 </button>
                 <button type="button" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-black/50 hover:bg-black/5">
                   <Shapes className="size-3.5" />
-                  画布
+                  {ui.canvas}
                 </button>
                 <button type="button" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-black/50 hover:bg-black/5">
                   <Scissors className="size-3.5" />
-                  编辑器
+                  {ui.editor}
                 </button>
               </div>
 
@@ -1282,10 +1085,10 @@ function AppHomePageInner({ locale, base }: Props) {
                   {refImg && (
                     <div className="mb-3 flex items-center gap-3 rounded-xl border border-black/10 bg-black/[0.02] p-3">
                       <div className="relative size-16 shrink-0 overflow-hidden rounded-lg">
-                        <Image src={refImg} alt="參考圖" fill sizes="64px" className="object-cover" />
+                        <Image src={refImg} alt={ui.refImg} fill sizes="64px" className="object-cover" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium text-black/70">參考圖</p>
+                        <p className="text-xs font-medium text-black/70">{ui.refImg}</p>
                         <p className="mt-0.5 truncate text-[11px] text-black/45">{refImg.split("/").pop()}</p>
                       </div>
                       <button
@@ -1302,8 +1105,8 @@ function AppHomePageInner({ locale, base }: Props) {
                   <div className="flex gap-3 rounded-2xl border border-black/[0.07] bg-black/[0.02] p-2.5 transition-colors focus-within:border-[#1f11ed]/35 focus-within:bg-white">
                     <button
                       type="button"
-                      aria-label="上传参考图"
-                      title="上传参考图"
+                      aria-label={ui.uploadRef}
+                      title={ui.uploadRef}
                       className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white text-black/50 shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:text-[#1f11ed]"
                     >
                       <Plus className="size-5" />
@@ -1375,6 +1178,16 @@ function AppHomePageInner({ locale, base }: Props) {
                     >
                       <AtSign className="size-4" />
                     </button>
+                    {/* F1 提示词优化：charge-after 扣积分 → refresh 刷余额 */}
+                    <button
+                      type="button"
+                      onClick={() => void doOptimize()}
+                      disabled={optimizing || busy || !prompt.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[#1f11ed]/25 bg-[#f0eefe] px-3 py-1.5 text-xs font-semibold text-[#1f11ed] transition-colors hover:bg-[#e7e6fd] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {optimizing && <Loader2 className="size-3.5 animate-spin" />}
+                      {optimizing ? f.optimizing : f.optimize}
+                    </button>
                     {/* Credits（F2：quote 实时价，无选择时显示所选默认规格价） */}
                     <span
                       className="inline-flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-xs tabular-nums text-black/70"
@@ -1405,10 +1218,13 @@ function AppHomePageInner({ locale, base }: Props) {
                       {busy ? `${progress}%` : "Create"}
                     </button>
                   </div>
+                  {optimizeErr && (
+                    <p className="mt-2 text-xs text-red-600">{optimizeErr}</p>
+                  )}
                   {taskError && (
                     <p className="mt-2 text-xs text-red-600">
                       {taskError.code === "INSUFFICIENT_CREDITS"
-                        ? `${taskError.message}（可签到领取积分或升级套餐）`
+                        ? `${taskError.message}（${locale === "en" ? "check in for credits or upgrade" : "可签到领取积分或升级套餐"}）`
                         : taskError.message}
                     </p>
                   )}
@@ -1418,20 +1234,18 @@ function AppHomePageInner({ locale, base }: Props) {
                 </div>
                 </div>
 
-                {/* 右：结果区 */}
+                {/* 右：任务列表（对齐 nova 参考图：72px 小方图任务卡 + 筛选 + 统计 + 清空） */}
                 <div className="min-w-0 flex-1">
-                  <ResultPane
+                  <TaskListPane
+                    locale={locale}
+                    view={view === "image" ? "image" : view === "audio" ? "audio" : "video"}
                     busy={busy}
                     progress={progress}
                     taskStatus={isTranslate ? undefined : taskStatus}
-                    resultUrl={resultUrl}
-                    results={resultViews}
-                    prompt={prompt}
-                    paramTags={resultParamTags}
-                    onReuse={() => void handleCreate()}
-                    onClear={() => { resetTask(); setPrompt(""); }}
+                    refreshKey={resultStamp}
+                    onEdit={setPrompt}
+                    onRerun={rerunFromRow}
                     onPickExample={setPrompt}
-                    stamp={resultStamp}
                   />
                 </div>
               </div>
@@ -1528,8 +1342,6 @@ function AppHomePageInner({ locale, base }: Props) {
             </div>
           )}
 
-          {/* F4 资产视图：真实资产（assetsApi.list）+ 行内二次确认删除；未登录保留占位外观 */}
-          {view === "assets" && <AssetsGrid label={a.assets} />}
 
           {/* F5 个人中心「我的作品」：网格 + 分类/日期筛选 + 批量操作 + 大图预览 */}
           {view === "works" && <WorksGallery i18n={worksI18n} />}
@@ -1575,22 +1387,6 @@ function AppHomePageInner({ locale, base }: Props) {
               </div>
             </div>
           )}
-
-          <h2 className="mx-auto mt-12 max-w-6xl text-lg font-extrabold">
-            {a.quickTitle}
-          </h2>
-          <div className="mx-auto mt-4 grid max-w-6xl grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-            {/* F4 模板数据源：catalogApi.templates()，失败回退字典名单；点击预填 prompt + 参考图 */}
-            {/* 交接 F2：onSelect 仅 setPrompt/setRefImg，?prompt=&img= 解析逻辑未动； */}
-            {/* 若服务端模板图为远端 URL，refImg 预览的 next/Image 需 F2 侧兼容（见 F4 报告） */}
-            <AppQuickTemplates
-              fallback={a.quick}
-              onSelect={(p, img) => {
-                setPrompt(p);
-                setRefImg(img);
-              }}
-            />
-          </div>
 
           <h2 className="mx-auto mt-12 max-w-6xl text-lg font-extrabold">
             {a.inspTitle}

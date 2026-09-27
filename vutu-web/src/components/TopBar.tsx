@@ -16,11 +16,14 @@ const TABS = [
 interface Props {
   active: string;
   onTab: (key: string) => void;
-  credits: number;
+  credits: number | null;
   offline: boolean;
+  userLabel: string | null;
+  onAuth: () => void;
   onAssets: () => void;
   onGallery: () => void;
   onSettings: () => void;
+  onBatch: () => void;
 }
 
 export function TopBar({
@@ -28,9 +31,12 @@ export function TopBar({
   onTab,
   credits,
   offline,
+  userLabel,
+  onAuth,
   onAssets,
   onGallery,
   onSettings,
+  onBatch,
 }: Props) {
   return (
     <header className="topbar">
@@ -61,10 +67,24 @@ export function TopBar({
       </nav>
 
       <div className="topbar__right">
-        <span className="topbar__credits" title="剩余积分">
-          <span className="topbar__credits-dot" aria-hidden="true" />
-          {credits.toFixed(2)}
-        </span>
+        {credits === null ? (
+          <button type="button" className="ghost-btn" onClick={onAuth} title="登录后使用真实服务">
+            <span>登录</span>
+          </button>
+        ) : (
+          <>
+            <span className="topbar__credits" title={`剩余积分${userLabel ? `（${userLabel}）` : ''}`}>
+              <span className="topbar__credits-dot" aria-hidden="true" />
+              {credits.toFixed(2)}
+            </span>
+            <button type="button" className="ghost-btn" onClick={onAuth} title={userLabel ?? '账号'}>
+              <span>{userLabel ?? '账号'}</span>
+            </button>
+            <button type="button" className="ghost-btn" onClick={onBatch} title="批量生成（模板 × N 并发）">
+              <span>批量</span>
+            </button>
+          </>
+        )}
 
         <button type="button" className="icon-btn" onClick={onAssets} title="素材库" aria-label="素材库">
           <IconGrid size={17} />

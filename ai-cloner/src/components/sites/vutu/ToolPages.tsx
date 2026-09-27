@@ -2,17 +2,19 @@
 // F3 计费展示的定价页需要 hooks 拉 plans/skus/credit-packs，故本文件为客户端组件
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Check } from "lucide-react";
 import { SiteHeader } from "./SiteHeader";
 import { SiteFooter } from "./SiteFooter";
 import { ToolComposer } from "./ToolComposer";
-import { Faq, StepsHow } from "./InfoSections";
+import { CtaBanner, Faq, StepsHow } from "./InfoSections";
 import type { Locale } from "./site-data";
 import { siteContent } from "./site-data";
 // F3：定价数据全部走共享 billingApi，不虚构 checkout（Phase 2 未做）
 import { AuthProvider } from "@/lib/api/auth-context";
 import { billingApi } from "@/lib/api/resources";
 import type { CreditPack, PlanView, SkuModel } from "@/lib/api/types";
+import { Testimonials } from "./HomeSections";
 
 interface Props {
   locale: Locale;
@@ -25,7 +27,8 @@ export function TextToVideoPage({ locale, base }: Props) {
     <>
       <SiteHeader locale={locale} base={base} />
       <main className="bg-[#fafafa] text-black">
-        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-[1fr_380px]">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-[220px_1fr_380px]">
+          <ToolSidebar locale={locale} />
           <div>
             <p className="text-xs font-semibold text-[#1f11ed]">{dict.t2vEyebrow}</p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight">{dict.t2vTitle}</h1>
@@ -42,6 +45,17 @@ export function TextToVideoPage({ locale, base }: Props) {
               <h3 className="font-bold">{dict.t2vFastTitle}</h3>
               <p className="mt-1.5 text-sm text-black/60">{dict.t2vFastBody}</p>
             </div>
+            {/* 末尾 CTA 横幅前的示例 prompt 卡（对齐源站结构） */}
+            <div className="mt-6 rounded-2xl border border-black/10 bg-white p-5">
+              <p className="text-xs font-semibold text-black/45">
+                {locale === "en" ? "Prompt" : "提示詞"}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-black/70">
+                {dict.promptLib.cards[0]?.title
+                  ? `${dict.promptLib.cards[0].title} — ${dict.composerShort}`
+                  : dict.composerShort}
+              </p>
+            </div>
           </div>
           <div className="lg:sticky lg:top-20 lg:self-start">
             <ToolComposer mode="text" locale={locale} />
@@ -49,6 +63,7 @@ export function TextToVideoPage({ locale, base }: Props) {
         </div>
         <StepsHow locale={locale} />
         <Faq locale={locale} />
+        <CtaBanner locale={locale} />
       </main>
       <SiteFooter locale={locale} />
     </>
@@ -61,7 +76,8 @@ export function ImageToVideoPage({ locale, base }: Props) {
     <>
       <SiteHeader locale={locale} base={base} />
       <main className="bg-[#fafafa] text-black">
-        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-[1fr_380px]">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 lg:grid-cols-[220px_1fr_380px]">
+          <ToolSidebar locale={locale} />
           <div>
             <p className="text-xs font-semibold text-[#1f11ed]">{dict.imgEyebrow}</p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight">{dict.imgTitle}</h1>
@@ -82,9 +98,51 @@ export function ImageToVideoPage({ locale, base }: Props) {
             <ToolComposer mode="image" locale={locale} />
           </div>
         </div>
+        <Faq locale={locale} list={dict.homeFaqs} />
+        <CtaBanner locale={locale} />
       </main>
       <SiteFooter locale={locale} />
     </>
+  );
+}
+
+/**
+ * 工具页左侧栏（源站有 CREATION TOOLS 导航列，本站此前缺失 —— UI-DIFF P1-10/11）。
+ * 数据复用字典 `toolsTitle` + `tools`（每个 locale 已有、href 均为有效页）。
+ */
+function ToolSidebar({ locale }: { locale: Locale }) {
+  const dict = siteContent[locale];
+  const appHref = locale === "en" ? "/en/app" : `/${locale}/app`;
+  return (
+    <aside className="hidden lg:block">
+      <div className="sticky top-24 rounded-2xl border border-black/10 bg-white p-4">
+        <Link
+          href={appHref}
+          className="mb-4 flex h-9 w-full items-center justify-center rounded-full bg-black text-xs font-bold text-white hover:opacity-85"
+        >
+          {dict.app.agentBtn}
+        </Link>
+        <p className="mb-2 px-1 text-[11px] font-medium text-black/40">
+          {dict.toolsTitle}
+        </p>
+        <nav className="space-y-0.5">
+          {(dict.tools ?? []).map((t) => (
+            <Link
+              key={t.title}
+              href={t.href}
+              className="flex items-center justify-between rounded-lg px-2 py-1.5 text-[13px] text-black/75 hover:bg-black/5"
+            >
+              <span>{t.title}</span>
+              {t.badge && (
+                <span className="rounded-full bg-[#e6e4ff] px-1.5 py-0.5 text-[9px] font-bold text-[#1f11ed]">
+                  {t.badge}
+                </span>
+              )}
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </aside>
   );
 }
 
@@ -133,6 +191,8 @@ function PricingPageInner({ locale, base }: Props) {
   const [plans, setPlans] = useState<PlanView[] | null>(null);
   const [skus, setSkus] = useState<SkuModel[] | null>(null);
   const [packs, setPacks] = useState<CreditPack[] | null>(null);
+  // 年付/月付切换（对齐源站结构；年付按 29% off 展示，非数字占位价不折算）
+  const [cycle, setCycle] = useState<"yearly" | "monthly">("yearly");
   // Phase 2 未做 checkout：只记录被点的购买项，行内小字提示联系运营（不用 alert）
   const [noticeFor, setNoticeFor] = useState<string | null>(null);
   const contactText =
@@ -196,6 +256,29 @@ function PricingPageInner({ locale, base }: Props) {
         hot: t.hot,
       }));
 
+  // 年付折算：$N → $round(N×0.71)（源站 Yearly 29% off）；非数字占位价（NT$XXX 等）原样
+  const shownTiers = tierViews.map((t) => {
+    if (cycle !== "yearly") return t;
+    const m = t.price.match(/^\$(\d+(?:\.\d+)?)$/);
+    if (!m) return t;
+    const discounted = Math.round(Number(m[1]) * 0.71);
+    if (discounted === Number(m[1])) return t;
+    return {
+      ...t,
+      price: `$${discounted}`,
+      period: locale === "en" ? "/ mo, billed yearly" : "/ 月（年付）",
+    };
+  });
+
+  const cycleLabel = (c: "yearly" | "monthly") =>
+    c === "yearly"
+      ? locale === "en"
+        ? "Yearly · 29% off"
+        : "年付 · 省 29%"
+      : locale === "en"
+        ? "Monthly"
+        : "月付";
+
   return (
     <>
       <SiteHeader locale={locale} base={base} />
@@ -204,8 +287,24 @@ function PricingPageInner({ locale, base }: Props) {
           <p className="text-xs font-semibold text-[#1f11ed]">{dict.priceEyebrow}</p>
           <h1 className="mt-2 text-3xl font-bold">{dict.priceTitle}</h1>
           <p className="mx-auto mt-3 max-w-xl text-sm text-black/60">{dict.priceNote}</p>
-          <div className="mt-10 grid gap-5 text-left md:grid-cols-3">
-            {tierViews.map((t) => (
+          {/* 年付 / 月付切换（对齐源站结构 —— UI-DIFF P1-9） */}
+          <div className="mt-6 inline-flex items-center gap-1 rounded-full border border-black/10 bg-black/5 p-1">
+            {(["yearly", "monthly"] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCycle(c)}
+                aria-pressed={cycle === c}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                  cycle === c ? "bg-black text-white" : "text-black/60 hover:text-black"
+                }`}
+              >
+                {cycleLabel(c)}
+              </button>
+            ))}
+          </div>
+          <div className="mt-8 grid gap-5 text-left md:grid-cols-3">
+            {shownTiers.map((t) => (
               <div
                 key={t.key}
                 className={`relative rounded-2xl border p-6 ${
@@ -327,6 +426,14 @@ function PricingPageInner({ locale, base }: Props) {
             </div>
           )}
         </div>
+        {/* 用户评价（源站定价页有评价区 —— UI-DIFF P1-9；复用字典 4 条） */}
+        <Testimonials locale={locale} />
+        {/* 定价专属 9 问 FAQ（缺省回退通用 FAQ） */}
+        <Faq
+          locale={locale}
+          list={dict.priceFaqs ?? dict.faqs}
+          title={dict.faqTitle}
+        />
       </main>
       <SiteFooter locale={locale} />
     </>

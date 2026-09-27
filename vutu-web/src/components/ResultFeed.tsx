@@ -13,6 +13,10 @@ interface Props {
   onRegenerate: (t: TaskSummary) => void;
   onDelete: (t: TaskSummary) => void;
   onCancel: (t: TaskSummary) => void;
+  /** F2 反推提示词（成功才扣积分） */
+  onReverse?: (t: TaskSummary) => void;
+  /** F4 发布到灵感广场 */
+  onPublish?: (t: TaskSummary) => void;
 }
 
 const STATUS_TEXT: Record<TaskStatus, string> = {
@@ -24,7 +28,7 @@ const STATUS_TEXT: Record<TaskStatus, string> = {
   timeout: '超时',
 };
 
-export function ResultFeed({ tasks, onRegenerate, onDelete, onCancel }: Props) {
+export function ResultFeed({ tasks, onRegenerate, onDelete, onCancel, onReverse, onPublish }: Props) {
   if (tasks.length === 0) {
     return (
       <div className="feed feed--empty">
@@ -50,6 +54,8 @@ export function ResultFeed({ tasks, onRegenerate, onDelete, onCancel }: Props) {
           onRegenerate={onRegenerate}
           onDelete={onDelete}
           onCancel={onCancel}
+          onReverse={onReverse}
+          onPublish={onPublish}
         />
       ))}
       <div className="feed__tail" aria-hidden="true" />
@@ -62,11 +68,17 @@ function ResultCard({
   onRegenerate,
   onDelete,
   onCancel,
+  onReverse,
+  onPublish,
 }: {
   task: TaskSummary;
   onRegenerate: (t: TaskSummary) => void;
   onDelete: (t: TaskSummary) => void;
   onCancel: (t: TaskSummary) => void;
+  /** F2 反推提示词（成功才扣积分） */
+  onReverse?: (t: TaskSummary) => void;
+  /** F4 发布到灵感广场 */
+  onPublish?: (t: TaskSummary) => void;
 }) {
   const busy = task.status === 'queued' || task.status === 'running';
   const failed = task.status === 'failed' || task.status === 'timeout';
@@ -132,6 +144,28 @@ function ResultCard({
               <IconRefresh size={15} />
               <span>再次生成</span>
             </button>
+            {image && task.status === 'succeeded' && onReverse && (
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => onReverse(task)}
+                title="从结果图反推提示词（成功才扣积分）"
+              >
+                <IconRefresh size={15} />
+                <span>反推</span>
+              </button>
+            )}
+            {image && task.status === 'succeeded' && onPublish && (
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => onPublish(task)}
+                title="发布到灵感广场"
+              >
+                <IconSparkle size={15} />
+                <span>发布</span>
+              </button>
+            )}
             {busy ? (
               <button type="button" className="ghost-btn" onClick={() => onCancel(task)} title="取消">
                 <IconX size={15} />

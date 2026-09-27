@@ -31,6 +31,8 @@ import { ledger } from './ledger.js';
 import { pricingEngine, normalizeSpec, skuOf } from './engine.js';
 import { billingService } from './service.js';
 import { authGuard } from '../auth/guard.js';
+import { adminKeyFingerprint, recordAdminAudit, verifyAdminToken } from '../admin/routes.js';
+import { batchStats, createBatch, redeem, redeemCodeSchema } from './redeem.js';
 
 const log = childLogger({ mod: 'billing-routes' });
 
@@ -339,6 +341,57 @@ export const billingRoutes: RouteModule = async (app: FastifyInstance) => {
     });
 
     return paged(req, page.items, page.nextCursor);
+  });
+  // ============================ xiaoye-adoption F3：积分兑换码（R1，方案 §5） ============================
+
+  const redeemBody = z.object({ code: redeemCodeSchema });
+  const redeemKeysBody = z.object({
+    count: z.number().int().min(1).max(1000),
+    credits: z.number().int().min(1).max(1_000_000),
+    expiresInDays: z.number().int().min(1).max(3650).optional(),
+    note: z.string().max(200).optional(),
+  });
+
+  /**
+   * 用户兑换：条件更新（redeemed_by IS NULL）是防双花唯一裁决点 → 同事务 grant(type:'promo')。
+   * 不存在 → 404（不泄露"格式错 vs 不存在"）；过期/已被兑 → 400（reason 承载语义）。
+   */
+  app.post('/v1/billing/redeem', { preHandler: [app.requireAuth] }, async (req) => {
+    const userId = requireUserId(req);
+    const body = redeemBody.parse(req.body);
+    const result = await redeem(userId, body.code);
+    return ok(req, { credits: result.credits, balanceAfter: result.balanceAfter });
+  });
+
+  /** admin 批量生成（明文码仅此响应出现一次；DB 只存 sha256；审计不含明文） */
+  app.post('/v1/admin/redeem-keys', async (req) => {
+    assertInternal(req);
+    await requireAdmin(req);
+    const token = verifyAdminToken(req); // 指纹入审计，绝不落明文 token
+    const body = redeemKeysBody.parse(req.body);
+    const result = await createBatch({
+      adminKeyFingerprint: adminKeyFingerprint(token),
+      count: body.count,
+      credits: body.credits,
+      ...(body.expiresInDays !== undefined ? { expiresInDays: body.expiresInDays } : {}),
+      ...(body.note !== undefined ? { note: body.note } : {}),
+    });
+    await recordAdminAudit({
+      adminKey: adminKeyFingerprint(token),
+      action: 'redeem_keys.create',
+      // ⚠️ 审计只记批次元数据，**不含 codes 明文**（明文只进本次 HTTP 响应体）
+      target: { batchId: result.batchId },
+      payload: { count: body.count, credits: body.credits, note: body.note ?? '' },
+    });
+    return ok(req, { batchId: result.batchId, codes: result.codes });
+  });
+
+  /** admin 批次统计：total / redeemed / pending */
+  app.get('/v1/admin/redeem-keys', async (req) => {
+    assertInternal(req);
+    await requireAdmin(req);
+    const q = z.object({ batchId: z.string().min(1).max(64) }).parse(req.query);
+    return ok(req, await batchStats(q.batchId));
   });
 };
 

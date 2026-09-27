@@ -90,7 +90,7 @@ function SiteHeaderInner({ locale, base }: SiteHeaderProps) {
     // Menu 0: Create — route by item title to matching app tool view
     if (menuIndex === 0) {
       const t = title.toLowerCase();
-      if (/agent|創作|创作|エージェント|에이전트/i.test(t)) return `${base === "/" ? "" : base}/app`;
+      if (/agent|創作|创作|エージェント|에이전트/i.test(t)) return appHref;
       if (/canvas|画布|畫布|キャンバス|캔버스/i.test(t)) return `${appHref}?tool=canvas`;
       if (/editor|编辑|編輯|エディタ|편집/i.test(t)) return `${appHref}?tool=editor`;
       if (/template|模板|模板|テンプレ|템플릿|脚本|腳本|scripts/i.test(t)) return `${appHref}?tool=explore`;
@@ -103,8 +103,8 @@ function SiteHeaderInner({ locale, base }: SiteHeaderProps) {
       // Default: AI Video tools (影片/视频/動画/영상/video)
       return `${appHref}?tool=video`;
     }
-    // Menu 4: Pricing
-    if (menuIndex === 4) return `${base === "/" ? "/en/app" : base}/pricing`;
+    // Menu 4: Pricing（EN 内容在根级 /pricing，勿再拼 /en/app/pricing）
+    if (menuIndex === 4) return `${base === "/" ? "" : base}/pricing`;
     return appHref;
   }
   return (

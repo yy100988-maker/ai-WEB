@@ -239,6 +239,9 @@ export const LEDGER_TYPES = [
   'refund',
   'admin_adjust',
   'promo',
+  // R1 修订（docs/xiaoye-adoption-design.md §9，决议 D1，2026-09-23，加法扩展）：
+  // LLM 服务扣费（提示词优化/反推），由 ledger.spend() 写入，delta = -amount。
+  'service_deduct',
   'expire',
 ] as const;
 export type LedgerType = (typeof LEDGER_TYPES)[number];

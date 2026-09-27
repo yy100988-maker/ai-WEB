@@ -19,11 +19,15 @@
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { err } from '../../core/errors.js';
-import { ok, type RouteModule } from '../../core/http.js';
+import { ok, type RouteModule, requireUserId} from '../../core/http.js';
 import { childLogger } from '../../core/logger.js';
 import { ANONYMOUS_USER_ID } from '../../core/ids.js';
 import { allowAnonymous, listLibrary, recordCopy, recordView, toggleLike, timezoneOfUser, findPostByPublicId, ANON_TIMEZONE } from './service.js';
 import { authGuard } from '../auth/guard.js';
+import { randomUUID } from 'node:crypto';
+import { parseAcceptLanguage } from '../../core/types.js';
+import { runOptimize, runReverse } from './llm.js';
+import { publishPost, withdrawPost, imageUrlFor } from './publish.js';
 
 const log = childLogger({ mod: 'prompt-routes' });
 
@@ -153,5 +157,102 @@ export const promptRoutes: RouteModule = async (app: FastifyInstance) => {
 
     const result = await toggleLike({ postId, userId, timezone });
     return ok(req, result);
+  });
+
+  // ============================ xiaoye-adoption F1/F2/F4（R1，方案 §3/§4/§6） ============================
+
+  const optimizeSchema = z.object({ prompt: z.string().min(1).max(8000) });
+  const reverseSchema = z.object({ assetId: z.string().min(1).max(64) });
+  const publishSchema = z.object({
+    tabCode: z.string().min(1).max(40),
+    // title = 提示词全文（PromptPost 语义"卡片标题=可复制内容"），上限对齐提示词规范 2000
+    title: z.string().min(1).max(2000),
+    assetId: z.string().min(1).max(64),
+  });
+  const postIdSchema = z.object({ id: z.string().min(1).max(160) });
+
+  /**
+   * 幂等键：header `Idempotency-Key` 优先（前端每次点击生成，网络重试不重复扣费）；
+   * 缺失则每次请求独立随机（每次都消费一次服务）。
+   */
+  function clientKey(req: FastifyRequest): string {
+    const h = req.headers['idempotency-key'];
+    if (typeof h === 'string' && h.length >= 8 && h.length <= 128) return h;
+    return randomUUID();
+  }
+
+  /**
+   * F1 提示词优化（决议 D1：扣积分；charge-after，方案 §3）。
+   * 429 限频 / 402 余额不足（预检先于上游）/ 上游失败 500 且不扣费。
+   */
+  app.post('/v1/prompts/optimize', { preHandler: [app.requireAuth] }, async (req) => {
+    const userId = requireUserId(req);
+    const body = optimizeSchema.parse(req.body);
+    const result = await runOptimize({
+      userId,
+      prompt: body.prompt,
+      idempotencyKey: clientKey(req),
+    });
+    return ok(req, {
+      optimized: result.prompt,
+      credits: result.credits,
+      latencyMs: result.latencyMs,
+    });
+  });
+
+  /**
+   * F2 反推提示词（图片 → 提示词；资产归属 404；输出语言随 Accept-Language）。
+   */
+  app.post('/v1/prompts/reverse', { preHandler: [app.requireAuth] }, async (req) => {
+    const userId = requireUserId(req);
+    const body = reverseSchema.parse(req.body);
+    const locale = parseAcceptLanguage(req.headers['accept-language']);
+    const result = await runReverse({
+      userId,
+      assetPublicId: body.assetId,
+      lang: locale ?? 'en',
+      idempotencyKey: clientKey(req),
+    });
+    return ok(req, {
+      prompt: result.prompt,
+      assetId: result.assetId,
+      credits: result.credits,
+      latencyMs: result.latencyMs,
+    });
+  });
+
+  /**
+   * F4 用户发布（决议 D3：PROMPT_AUTO_APPROVE 缺省 true 即 published；false 则 pending 待审）。
+   * 标题在 publishPost 内过 L1+L2（违规 422）。
+   */
+  app.post('/v1/prompt-library', { preHandler: [app.requireAuth] }, async (req, reply) => {
+    const userId = requireUserId(req);
+    const body = publishSchema.parse(req.body);
+    const result = await publishPost({
+      userId,
+      tabCode: body.tabCode,
+      title: body.title,
+      assetId: body.assetId,
+    });
+    reply.status(201);
+    return ok(req, result);
+  });
+
+  /** F4 撤回自己的帖子（active=false 软下架，计数历史保留）；他人 404 不泄露存在性 */
+  app.delete('/v1/prompt-library/:id', { preHandler: [app.requireAuth] }, async (req) => {
+    const userId = requireUserId(req);
+    const params = postIdSchema.parse(req.params);
+    await withdrawPost(userId, params.id);
+    return ok(req, { ok: true });
+  });
+
+  /**
+   * F4 稳定图片路由（方案 §6.1）：按需现签 view URL 后 302 —— 列表/SSR 字段永不携带
+   * 会过期的预签名。rejected/撤回的帖子此路由立即 404（imageUrlFor 内校验）。
+   */
+  app.get('/v1/prompt-library/:id/image', async (req, reply) => {
+    const params = postIdSchema.parse(req.params);
+    const url = await imageUrlFor(params.id);
+    return reply.redirect(url);
   });
 };

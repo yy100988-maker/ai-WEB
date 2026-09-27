@@ -6,9 +6,10 @@ import type { Locale } from "./site-data";
 import { siteContent } from "./site-data";
 import { AuthProvider, useAuth } from "@/lib/api/auth-context";
 import { useTaskRunner } from "@/lib/api/use-task-runner";
-import { assetsApi, billingApi, catalogApi } from "@/lib/api/resources";
+import { assetsApi, billingApi, catalogApi, promptsApi } from "@/lib/api/resources";
 import type { CatalogModel, ModelDetail, ModelParamOption } from "@/lib/api/types";
 import { AuthDialog } from "./AuthDialog";
+import { errCode, pickFeature } from "./feature-ui";
 
 interface ToolComposerProps {
   mode: "text" | "image";
@@ -56,7 +57,8 @@ function parseSeconds(label: string): number {
 
 function ToolComposerInner({ mode, locale }: ToolComposerProps) {
   const dict = siteContent[locale];
-  const { user } = useAuth();
+  const f = pickFeature(locale);
+  const { user, refresh } = useAuth();
   const { running, status, progress, results, error, run } = useTaskRunner();
 
   // 基础能力：文生视频 / 文生图（有上传图时提交改用 image_to_image）。
@@ -79,6 +81,35 @@ function ToolComposerInner({ mode, locale }: ToolComposerProps) {
   const [uploading, setUploading] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // F1 提示词优化（charge-after 扣积分 → refresh；失败保留原文）
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeErr, setOptimizeErr] = useState<string | null>(null);
+  async function doOptimize(): Promise<void> {
+    if (optimizing) return;
+    if (user === null) {
+      setLoginOpen(true);
+      return;
+    }
+    const src = prompt.trim();
+    if (!src) {
+      setOptimizeErr(f.needPrompt);
+      return;
+    }
+    setOptimizing(true);
+    setOptimizeErr(null);
+    try {
+      const out = await promptsApi.optimize(src, crypto.randomUUID());
+      setPrompt(out.optimized.slice(0, 2000));
+      void refresh();
+    } catch (e) {
+      const code = errCode(e);
+      if (code === "UNAUTHORIZED") setLoginOpen(true);
+      else setOptimizeErr(f.optimizeFail);
+    } finally {
+      setOptimizing(false);
+    }
+  }
 
   const busy = running || uploading;
   const done = status === "succeeded";
@@ -310,6 +341,16 @@ function ToolComposerInner({ mode, locale }: ToolComposerProps) {
         </span>
         <span>{prompt.length}/2000</span>
       </div>
+      <button
+        type="button"
+        onClick={() => void doOptimize()}
+        disabled={optimizing || busy || prompt.trim().length === 0}
+        className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#1f11ed]/25 bg-[#f0eefe] px-3 py-1.5 text-xs font-semibold text-[#1f11ed] transition-colors hover:bg-[#e7e6fd] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {optimizing && <Loader2 className="size-3.5 animate-spin" />}
+        {optimizing ? f.optimizing : f.optimize}
+      </button>
+      {optimizeErr && <p className="mt-1 text-xs text-red-600">{optimizeErr}</p>}
       {/* 模型 chip 行（顶部新增，样式复用 Chip） */}
       {models.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">

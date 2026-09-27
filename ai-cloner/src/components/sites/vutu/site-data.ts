@@ -292,7 +292,7 @@ export interface SiteDictionary {
   cta2Button: string;
   homeFaqTitle: string;
   homeFaqs: Faq[];
-  footerCols: { head: string; links: { label: string; href: string }[] }[];
+  footerCols: { head: string; links: { label: string; href?: string }[] }[];
   t2vEyebrow: string;
   t2vTitle: string;
   t2vBody: string;
@@ -307,6 +307,8 @@ export interface SiteDictionary {
   priceEyebrow: string;
   priceTitle: string;
   priceNote: string;
+  /** 定价页专属 FAQ（可选；缺省时定价页回退字典 faqs，见 PricingPage） */
+  priceFaqs?: Faq[];
   tiers: PriceTier[];
   app: AppSection;
 }
@@ -351,19 +353,19 @@ const zhTW: SiteDictionary = {
       title: "創作，不再受限於媒介",
       body: "文字、照片、影像、音訊，每種格式都能成為提示。影片、圖片、虛擬分身與音樂，Vutu 一站完成。",
       cta: "立即創作",
-      href: "/app/video",
+      href: "/zh-TW/app",
     },
     {
       title: "賦予想法以執行力",
       body: "最強大的影片 Agent。你的 AI 導演。從靈感到成片，全程自主規劃、自主創作、自主迭代。",
       cta: "立即創作",
-      href: "/app/video",
+      href: "/zh-TW/app",
     },
     {
       title: "隨心調整，精準到位",
       body: "自由拖拽，精準定位，讓每一處改動，都落在你想要的地方。Vutu Canvas 讓編輯，回歸直覺。",
       cta: "立即創作",
-      href: "/app/video",
+      href: "/zh-TW/app",
     },
   ],
   featuresTitle: "功能特色",
@@ -583,30 +585,22 @@ const zhTW: SiteDictionary = {
     {
       head: "公司",
       links: [
-        { label: "聯絡我們", href: "/zh-TW/app" },
+        { label: "聯絡我們", href: "/contact-us" },
         { label: "價格方案", href: "/zh-TW/pricing" },
-        { label: "服務條款", href: "/zh-TW/pricing" },
-        { label: "隱私權政策", href: "/zh-TW/pricing" },
-        { label: "內容政策", href: "/zh-TW/pricing" },
-        { label: "部落格", href: "/zh-TW/app" },
-        { label: "聯盟計畫", href: "/zh-TW/app" },
+        { label: "服務條款", href: "/terms" },
+        { label: "隱私權政策", href: "/privacy-policy" },
+        { label: "內容政策", href: "/content-policy" },
+        { label: "部落格", href: "/blog" },
+        { label: "聯盟計畫", href: "/affiliate" },
       ],
     },
     {
       head: "下載 App",
-      links: [
-        { label: "App Store", href: "/zh-TW/pricing" },
-        { label: "Google Play", href: "/zh-TW/pricing" },
-      ],
+      links: [{ label: "App Store" }, { label: "Google Play" }],
     },
     {
       head: "最新動態",
-      links: [
-        { label: "Discord", href: "/zh-TW/pricing" },
-        { label: "Twitter", href: "/zh-TW/pricing" },
-        { label: "Youtube", href: "/zh-TW/pricing" },
-        { label: "Instagram", href: "/zh-TW/pricing" },
-      ],
+      links: [{ label: "Discord" }, { label: "X" }, { label: "YouTube" }, { label: "Instagram" }],
     },
   ],
   h1a: "從想法到發布，",
@@ -632,6 +626,17 @@ const zhTW: SiteDictionary = {
   priceTitle: "選擇適合你的創作方案",
   priceNote:
     "本頁僅還原價格頁佈局，金額為示意佔位，不構成報價。實際方案與點數請以 ai.vutu.cc 官網為準。",
+  priceFaqs: [
+    { q: "什麼是積分，如何使用？", a: "積分是任務消耗的單位：文字轉影片每支從個位數積分起跳，圖片更便宜。餘額顯示在頂部欄，任務執行時扣除，失敗會自動退還。" },
+    { q: "可以先試用再訂閱嗎？", a: "可以——註冊即送一次性積分（7 天有效），另有每日簽到 5 點，足夠在付費前跑真實生成。" },
+    { q: "可以只訂閱一個月，不自動續費嗎？", a: "月付方案可在續費前隨時取消；方案在已付期間結束前保持有效。" },
+    { q: "如何取消訂閱？", a: "打開個人資料中的訂閱入口即可取消，無需客服；權限持續到當期結束。" },
+    { q: "我可以單獨購買更多積分嗎？", a: "可以——積分包為一次性購買，方案有效期內不過期。" },
+    { q: "升級會員後積分如何計算？", a: "升級立即補足當月差額積分；已消耗部分不回收。" },
+    { q: "影片會有浮水印嗎？如何去除？", a: "免費方案匯出帶浮水印；付費方案匯出乾淨檔案並附完整商業使用權。" },
+    { q: "我可以將 AI 生成的影片用於商業用途嗎？", a: "可以——付費方案涵蓋廣告、社群與行銷的完整商業用途，需遵守內容政策。" },
+    { q: "哪些裝置可以使用我的會員資格？", a: "網頁工作台支援桌面與平板的最新版 Chrome、Edge、Safari 與 Firefox。" },
+  ],
   tiers: [
     {
       name: "免費版",
@@ -763,34 +768,34 @@ const zhTW: SiteDictionary = {
   ],
   mega: [
     { head: "工具", items: [
-      { t: "AI 创作 Agent", d: "使用 AI 規劃、創作與完善" },
-      { t: "脚本", d: "从现成的工作流程开始" },
-      { t: "创作画布", d: "整理构想并重复使用视觉工作流程" },
-      { t: "时间轴编辑器", d: "剪辑、加上字幕、编排并完成影片" },
+      { t: "AI 創作 Agent", d: "使用 AI 規劃、創作與完善" },
+      { t: "腳本", d: "從現成的工作流程開始" },
+      { t: "創作畫布", d: "整理構想並重複使用視覺工作流程" },
+      { t: "時間軸編輯器", d: "剪輯、加上字幕、編排並完成影片" },
     ] },
     { head: "AI 影片", items: [
-      { t: "图片转影片", d: "将图片制作成动态影片" },
-      { t: "文字转影片", d: "根据提示词生成影片" },
-      { t: "网址转影片", d: "将任何网页转换成影片" },
-      { t: "影片转影片", d: "重新设计、编辑或强化现有影片素材" },
-      { t: "内容转影片", d: "使用 Agent 从脚本、文件或媒体开始创作" },
-      { t: "影片深度图", d: "把任何影片转成深度图" },
+      { t: "圖片轉影片", d: "將圖片製作成動態影片" },
+      { t: "文字轉影片", d: "根據提示詞生成影片" },
+      { t: "網址轉影片", d: "將任何網頁轉換成影片" },
+      { t: "影片轉影片", d: "重新設計、編輯或強化現有影片素材" },
+      { t: "內容轉影片", d: "使用 Agent 從腳本、檔案或媒體開始創作" },
+      { t: "影片深度圖", d: "把任何影片轉成深度圖" },
     ] },
-    { head: "AI 图像", items: [
-      { t: "文字转图片", d: "根据文字创作图片" },
-      { t: "图片转图片", d: "重新设计或转换图片" },
-      { t: "AI 背景移除工具", d: "移除任何图片的背景" },
-      { t: "AI 图片升级工具", d: "将图片提升至更高解析度" },
+    { head: "AI 圖像", items: [
+      { t: "文字轉圖片", d: "根據文字創作圖片" },
+      { t: "圖片轉圖片", d: "重新設計或轉換圖片" },
+      { t: "AI 背景移除工具", d: "移除任何圖片的背景" },
+      { t: "AI 圖片升級工具", d: "將圖片提升至更高解析度" },
     ] },
-    { head: "AI 音讯", items: [
-      { t: "AI 音乐", d: "生成原创音乐" },
-      { t: "文字转语音", d: "将文字转换为自然语音" },
+    { head: "AI 音訊", items: [
+      { t: "AI 音樂", d: "生成原創音樂" },
+      { t: "文字轉語音", d: "將文字轉換為自然語音" },
     ] },
     { head: "AI 工作室", items: [
-      { t: "爆款工作室", d: "创作并重新混合热门影片" },
-      { t: "AI 短剧", d: "根据你的想法打造一部短剧" },
-      { t: "口播虚拟人", d: "让虚拟分身自然说话" },
-      { t: "影片翻译", d: "翻译语音、字幕并同步嘴型" },
+      { t: "爆款工作室", d: "創作並重新混合熱門影片" },
+      { t: "AI 短劇", d: "根據你的想法打造一部短劇" },
+      { t: "口播虛擬人", d: "讓虛擬分身自然說話" },
+      { t: "影片翻譯", d: "翻譯語音、字幕並同步嘴型" },
     ] },
   ],
 };
@@ -835,19 +840,19 @@ const en: SiteDictionary = {
       title: "Create with anything",
       body: "Text, photos, video, audio — every format is a prompt. Video, images, avatars, and music — Vutu, all in one.",
       cta: "Create Now",
-      href: "/app/video",
+      href: "/en/app",
     },
     {
       title: "Turn ideas into action",
       body: "The most powerful Video Agent. Your AI director. From idea to final cut — it plans, creates, and iterates, all on its own.",
       cta: "Create Now",
-      href: "/app/video",
+      href: "/en/app",
     },
     {
       title: "Adjust anything, exactly as intended",
       body: "Drag, drop, and place every edit exactly where you want it. Vutu Canvas makes editing feel instinctive.",
       cta: "Create Now",
-      href: "/app/video",
+      href: "/en/app",
     },
   ],
   featuresTitle: "Features",
@@ -1047,18 +1052,38 @@ const en: SiteDictionary = {
     {
       head: "Generate",
       links: [
-        { label: "Image to Video", href: "/en/app?tool=video" },
-        { label: "Text to Video", href: "/en/app?tool=video" },
+        { label: "Image to Video", href: "/image-to-video" },
+        { label: "Text to Video", href: "/text-to-video" },
+        { label: "Video to Video", href: "/en/app?tool=video" },
+        { label: "Reference to Video", href: "/en/app?tool=video" },
+        { label: "AI Image Editor", href: "/en/app?tool=image" },
+        { label: "AI Video Editor", href: "/en/app?tool=editor" },
         { label: "More", href: "/#features" },
       ],
     },
     {
       head: "Company",
       links: [
-        { label: "Contact", href: "/en/app" },
-        { label: "Pricing", href: "/en/app" },
-        { label: "Terms", href: "/en/app" },
-        { label: "Privacy", href: "/en/app" },
+        { label: "Contact Us", href: "/contact-us" },
+        { label: "Pricing", href: "/pricing" },
+        { label: "Terms of Service", href: "/terms" },
+        { label: "Privacy Policy", href: "/privacy-policy" },
+        { label: "Content Policy", href: "/content-policy" },
+        { label: "Blog", href: "/blog" },
+        { label: "Affiliate", href: "/affiliate" },
+      ],
+    },
+    {
+      head: "Get the App",
+      links: [{ label: "App Store" }, { label: "Google Play" }],
+    },
+    {
+      head: "Stay Tuned",
+      links: [
+        { label: "Discord" },
+        { label: "X" },
+        { label: "YouTube" },
+        { label: "Instagram" },
       ],
     },
   ],
@@ -1083,6 +1108,17 @@ const en: SiteDictionary = {
   priceEyebrow: "Pricing",
   priceTitle: "Pick the plan that fits",
   priceNote: "Layout replica with placeholder prices. See ai.vutu.cc for real plans.",
+  priceFaqs: [
+    { q: "What are credits and how do I use them?", a: "Credits are the unit tasks consume: text-to-video starts at a few credits per clip, images cost less. Your balance shows in the top bar and drops when a task runs, then refunds automatically if the task fails." },
+    { q: "Can I try before subscribing?", a: "Yes — signing up grants a one-time credit grant valid for 7 days, plus 5 daily check-in credits, enough to run real generations before you pay." },
+    { q: "Can I subscribe for one month without auto-renewal?", a: "Monthly plans can be cancelled any time before renewal; your plan stays active until the end of the paid period." },
+    { q: "How do I cancel my subscription?", a: "Open your profile, choose the subscription entry, and cancel. No calls, no emails — access continues until the period ends." },
+    { q: "Can I buy more credits separately?", a: "Yes — credit packs are one-time purchases and do not expire while your plan is active." },
+    { q: "How are credits calculated after an upgrade?", a: "Upgrading tops up the difference in monthly credits immediately; already-consumed credits are not clawed back." },
+    { q: "Will videos have watermarks? How do I remove them?", a: "Free-plan exports carry a watermark. Paid plans export clean files with full commercial rights." },
+    { q: "Can I use generated videos commercially?", a: "Yes — paid plans include full commercial usage for ads, social, and campaigns, subject to the content policy." },
+    { q: "Which devices can I use my membership on?", a: "The web studio works on current Chrome, Edge, Safari, and Firefox on desktop and tablet." },
+  ],
   tiers: [
     {
       name: "Free",
@@ -1178,14 +1214,14 @@ const en: SiteDictionary = {
       selected: "{n} selected",
     },
   },
-  recordTitle: "創作紀錄",
-  filterAll: "全部",
-  filterVideo: "影片",
-  filterImage: "圖片",
-  filterAudio: "音訊",
-  imageLead: "一段文字或一張參考圖，生成你想要的畫面。",
-  imageHero: "AI 圖像",
-  imageComposerPh: "使用文字或圖片建立或編輯圖片",
+  recordTitle: "Creation Records",
+  filterAll: "All",
+  filterVideo: "Video",
+  filterImage: "Image",
+  filterAudio: "Audio",
+  imageLead: "A prompt or a reference image — get the scene you have in mind.",
+  imageHero: "AI Image",
+  imageComposerPh: "Create or edit an image with text or an image",
   modelLabel: "Model",
   menus2: [
     [

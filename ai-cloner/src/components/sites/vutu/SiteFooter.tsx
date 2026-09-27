@@ -10,6 +10,13 @@ interface SiteFooterProps {
 export function SiteFooter({ locale }: SiteFooterProps) {
   const dict = siteContent[locale];
   const columns = dict.footerCols;
+  // 底部版权行按 locale 输出（原为写死繁中，EN 页混入「版權所有」——UI-DIFF P1-6）
+  const rights =
+    locale === "zh-CN"
+      ? "© 2026 Vutu. 版权所有。"
+      : locale === "zh-TW"
+        ? "© 2026 Vutu. 版權所有。"
+        : "© 2026 Vutu. All rights reserved.";
   return (
     <footer className="border-t border-black/10 bg-white text-black">
       <div className="mx-auto grid max-w-[1420px] gap-10 px-5 py-14 md:grid-cols-[1.2fr_2fr] md:px-6">
@@ -38,12 +45,17 @@ export function SiteFooter({ locale }: SiteFooterProps) {
               <ul className="mt-3 space-y-2">
                 {col.links.map((link) => (
                   <li key={link.label}>
-                    <Link
-                      href={link.href}
-                      className="text-sm text-black/55 hover:text-black"
-                    >
-                      {link.label}
-                    </Link>
+                    {link.href ? (
+                      <Link
+                        href={link.href}
+                        className="text-sm text-black/55 hover:text-black"
+                      >
+                        {link.label}
+                      </Link>
+                    ) : (
+                      // 无 href = 纯展示条目（App 徽章/社交名），不再伪链到 pricing
+                      <span className="text-sm text-black/55">{link.label}</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -53,7 +65,7 @@ export function SiteFooter({ locale }: SiteFooterProps) {
       </div>
       <div className="border-t border-black/10">
         <div className="mx-auto flex max-w-[1420px] items-center justify-between px-5 py-4 text-xs text-black/40 md:px-6">
-          <span>© 2026 Vutu. 版權所有。</span>
+          <span>{rights}</span>
           <span>iOS / Android / Discord / X / YouTube</span>
         </div>
       </div>

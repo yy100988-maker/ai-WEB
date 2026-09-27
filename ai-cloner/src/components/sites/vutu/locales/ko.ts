@@ -43,19 +43,19 @@ export const ko: SiteDictionary = {
       title: "어떤 형식이든, 창작의 한계는 없다.",
       body: "텍스트, 사진, 영상, 오디오 등 모든 형식이 프롬프트가 됩니다. 영상, 이미지, 아바타, 음악까지 Vutu 하나로 모두 만들 수 있습니다.",
       cta: "지금 생성",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "아이디어를 실행으로.",
       body: "가장 강력한 비디오 Agent. 당신의 AI 감독. 아이디어부터 최종 컷까지 스스로 계획하고, 만들고, 반복합니다.",
       cta: "지금 생성",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "원하는 대로, 정확하게.",
       body: "드래그, 드롭으로 원하는 위치에 정확히 편집. Vutu Canvas는 편집을 직관적으로 만든다.",
       cta: "지금 생성",
-      href: "/app/video",
+      href: `${B}/app`,
     },
   ],
   featuresTitle: "기능",
@@ -69,7 +69,7 @@ export const ko: SiteDictionary = {
     {
       title: "AI 광고",
       body: "제품 정보를 입력하면 각 플랫폼에 맞는 광고 영상이 바로 완성됩니다.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "AI Ads",
     },
     {
@@ -81,19 +81,19 @@ export const ko: SiteDictionary = {
     {
       title: "AI 아바타",
       body: "사진 한 장으로 나만의 디지털 발표자를 만드세요.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Avatar",
     },
     {
       title: "텍스트 음성 변환",
       body: "대본을 입력하면 자연스러운 목소리로 읽어줍니다.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "TTS",
     },
     {
       title: "AI 음악",
       body: "분위기를 고르면 오리지널 BGM이 완성됩니다.",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Music",
     },
   ],
@@ -219,10 +219,10 @@ export const ko: SiteDictionary = {
     {
       head: "제작 도구",
       links: [
-        { label: "AI 에이전트", href: "/app/video" },
-        { label: "AI 캔버스", href: "/app/video" },
+        { label: "AI 에이전트", href: `${B}/app` },
+        { label: "AI 캔버스", href: `${B}/app` },
         { label: "AI 에디터", href: `${B}/text-to-video` },
-        { label: "음성 변환", href: `${B}/pricing` },
+        { label: "음성 변환", href: `${B}/app?tool=audio` },
       ],
     },
     {
@@ -236,10 +236,10 @@ export const ko: SiteDictionary = {
     {
       head: "회사",
       links: [
-        { label: "문의", href: `${B}/pricing` },
+        { label: "문의", href: "/contact-us" },
         { label: "가격", href: `${B}/pricing` },
-        { label: "이용약관", href: `${B}/pricing` },
-        { label: "개인정보", href: `${B}/pricing` },
+        { label: "이용약관", href: "/terms" },
+        { label: "개인정보", href: "/privacy-policy" },
       ],
     },
   ],

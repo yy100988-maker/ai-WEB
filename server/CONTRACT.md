@@ -3,6 +3,25 @@
 > 本文件是**冻结契约**。所有模块必须按此对接，禁止修改 `src/core/**` 的既有导出签名。
 > 需求源：`docs/backend-prd.md` v0.5、`docs/backend-detailed-design.md` v0.4。
 
+## 修订记录（Revision Log）
+
+### R1 · 2026-09-23 · xiaoye-adoption F1-F5
+
+依据：`docs/xiaoye-adoption-design.md`（决议 D1 扣积分 / D2 本期 A+B+C / D3 广场默认自动通过）。
+**全部为加法扩展，不改动任何既有导出签名。**
+
+| 位置 | 变更 |
+|---|---|
+| `core/types.ts` | `LEDGER_TYPES` += `'service_deduct'`（LLM 服务扣费，delta<0；仅扩大 union，无 exhaustive 消费方） |
+| `billing/ledger.ts` | `LedgerApi` += `spend({ userId, type, amount, idempotencyKey, note?, tx? }) => { balanceAfter }`：P2002 on `(userId, idempotencyKey)` 重放返回原结果；`balance >= amount` 条件扣减，严格保持 `余额 = SUM(delta)` |
+| 既有 RouteModule 内加注册（`main.ts` 挂载清单零改动） | `POST /v1/prompts/optimize`、`POST /v1/prompts/reverse`（prompts）；`POST /v1/billing/redeem`、`POST|GET /v1/admin/redeem-keys`（billing）；`POST /v1/prompt-library`、`DELETE /v1/prompt-library/:id`、`GET /v1/prompt-library/:id/image`（prompts）；`GET /v1/admin/prompt-posts`、`POST /v1/admin/prompt-posts/:id/approve|reject`（admin） |
+| `tasks` | create body 可选 `batchId`（`^b_[A-Za-z0-9_-]{6,40}$`）；`serializeTaskListRow` += `prompt`/`params`/`batchId`（向后兼容的新增字段，根治列表缺字段导致的逐行 hydrate） |
+| schema / migrations | `prompt_posts` += `status`/`created_by`/`reject_reason`；`tasks` += `batch_id` + `(user_id, batch_id)` 索引；新表 `redeem_keys` |
+| 新 env（**模块内解析，不入 core/config**） | `PROMPT_OPTIMIZE_CREDITS=1`、`PROMPT_REVERSE_CREDITS=2`、`PROMPT_OPTIMIZE_PER_MIN=10`、`PROMPT_OPTIMIZE_PER_DAY=100`、`PROMPT_REVERSE_PER_MIN=6`、`PROMPT_REVERSE_PER_DAY=60`、`PROMPT_AUTO_APPROVE=true`、`LK_CHAT_MODEL`（真实模式必填，fail-fast） |
+| 新共享件 | `src/modules/providers/chat.ts`：`chatOnce()`（`/v1/chat/completions` OpenAI 格式 —— 实测端点，docs/lk888-capabilities.md §3.2；MOCK_PROVIDER 返回样例零上游；同时是 moderation L2 的 Phase 2 替换入口） |
+
+以下 §0 起为原始冻结内容，涉及上述条目处按修订后语义理解。
+
 ## 0. 工程约定
 
 - 语言：TypeScript 5 strict（`noUncheckedIndexedAccess: true`），ESM（`"type": "module"`）。

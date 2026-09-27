@@ -32,6 +32,8 @@ const createTaskSchema = z.object({
   inputAssetIds: z.array(z.string()).max(20).default([]),
   params: z.record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])).default({}),
   idempotencyKey: z.string().min(8).max(128),
+  // F5：批量分组键（R1，方案 §7）——严格形状校验，杜绝任意串落库
+  batchId: z.string().regex(/^b_[A-Za-z0-9_-]{6,40}$/).optional(),
 });
 
 const listQuerySchema = z.object({
@@ -72,6 +74,7 @@ export const taskRoutes: RouteModule = async (app: FastifyInstance) => {
       inputAssetIds: body.inputAssetIds,
       params: body.params as Record<string, string | number | boolean | string[]>,
       idempotencyKey,
+      ...(body.batchId ? { batchId: body.batchId } : {}),
       ...(mockFail ? { mockFail } : {}),
     });
 
@@ -84,6 +87,10 @@ export const taskRoutes: RouteModule = async (app: FastifyInstance) => {
           status: result.status,
           progress: result.progress,
           capability: result.capability,
+          // 随响应下发 prompt/batchId：前端拿真实任务替换乐观占位时不丢提示词
+          // （vutu-web ResultFeed 与批量替换都依赖它）
+          prompt: body.prompt,
+          batchId: body.batchId,
           model: { id: result.modelId, displayName: result.modelDisplayName },
           quotedCredits: result.quotedCredits,
           remainingCredits: result.remainingCredits,

@@ -45,19 +45,19 @@ export const ja: SiteDictionary = {
       title: "あらゆるメディアを超えて、創造する。",
       body: "テキスト、写真、動画、音声——あらゆる形式がプロンプトになる。動画、画像、アバター、音楽まで、Vutuでまとめて作れる。",
       cta: "今すぐ作成",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "アイデアを、実行へ。",
       body: "最もパワフルな動画 Agent。あなたのAIディレクター。アイデアから完成まで、自ら計画し、創り、磨き上げる。",
       cta: "今すぐ作成",
-      href: "/app/video",
+      href: `${B}/app`,
     },
     {
       title: "思い通りに、どこでも調整できる。",
       body: "ドラッグ＆ドロップで、編集したい場所に正確に配置。Vutu Canvasは、編集を直感的にする。",
       cta: "今すぐ作成",
-      href: "/app/video",
+      href: `${B}/app`,
     },
   ],
   featuresTitle: "機能",
@@ -71,7 +71,7 @@ export const ja: SiteDictionary = {
     {
       title: "AI広告",
       body: "商品情報を入力すれば、各プラットフォーム向けの広告動画を自動生成。",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "AI Ads",
     },
     {
@@ -83,19 +83,19 @@ export const ja: SiteDictionary = {
     {
       title: "AIアバター",
       body: "1枚の写真から、あなただけのデジタルプレゼンターを作成。",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Avatar",
     },
     {
       title: "テキスト読み上げ",
       body: "台本を入力するだけで、自然な人声で読み上げます。",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "TTS",
     },
     {
       title: "AIミュージック",
       body: "ムードを選ぶだけで、オリジナルBGMが完成。",
-      href: "/app/video",
+      href: `${B}/app`,
       tag: "Music",
     },
   ],
@@ -221,10 +221,10 @@ export const ja: SiteDictionary = {
     {
       head: "作成ツール",
       links: [
-        { label: "AI Agent", href: "/app/video" },
-        { label: "AI キャンバス", href: "/app/video" },
+        { label: "AI Agent", href: `${B}/app` },
+        { label: "AI キャンバス", href: `${B}/app` },
         { label: "AI エディター", href: `${B}/text-to-video` },
-        { label: "テキスト読み上げ", href: `${B}/pricing` },
+        { label: "テキスト読み上げ", href: `${B}/app?tool=audio` },
       ],
     },
     {
@@ -238,10 +238,10 @@ export const ja: SiteDictionary = {
     {
       head: "会社",
       links: [
-        { label: "お問い合わせ", href: `${B}/pricing` },
+        { label: "お問い合わせ", href: "/contact-us" },
         { label: "価格設定", href: `${B}/pricing` },
-        { label: "利用規約", href: `${B}/pricing` },
-        { label: "プライバシー", href: `${B}/pricing` },
+        { label: "利用規約", href: "/terms" },
+        { label: "プライバシー", href: "/privacy-policy" },
       ],
     },
   ],
