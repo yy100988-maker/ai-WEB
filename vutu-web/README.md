@@ -129,7 +129,7 @@ python deploy/deploy.py rollback  # 回滚到上一版前端
 - **`nginx -t` 不通过就自动回滚**配置且不 reload
 - 幂等：`location /studio/` 已存在时跳过插入
 
-服务器：`13.250.182.43`（密钥 `D:\文档\亚马逊\APP.pem`），目录 `/opt/vutu-studio`。
+服务器：`13.229.183.21`（密钥 `D:\文档\亚马逊\126.pem`），目录 `/opt/vutu-studio`。
 
 ### 环境变量
 

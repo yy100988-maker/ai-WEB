@@ -1,4 +1,4 @@
-"""部署 vutu 前端优化到生产（13.250.182.43: /home/ubuntu/apps/deevid-clone）。
+"""部署 vutu 前端优化到生产（13.229.183.21: /home/ubuntu/apps/ai-WEB/ai-cloner）。
 
 流程：
   1. 备份远端当前源码（AppHomePage.tsx）+ 记录当前 BUILD_ID（回滚锚点）
@@ -24,11 +24,11 @@ import paramiko
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-HOST = "13.250.182.43"
-KEY = r"D:\文档\亚马逊\APP.pem"
+HOST = "13.229.183.21"
+KEY = r"D:\文档\亚马逊\126.pem"
 USER = "ubuntu"
 LOCAL_ROOT = r"D:\CODEX\WEB\ai-cloner"
-REMOTE_DIR = "/home/ubuntu/apps/deevid-clone"
+REMOTE_DIR = "/home/ubuntu/apps/ai-WEB/ai-cloner"
 BACKUP_DIR = "/home/ubuntu/apps/deevid-backups"
 
 # 只同步本次改动涉及的文件（不整树覆盖，避免误伤远端独有改动）

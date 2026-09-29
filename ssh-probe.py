@@ -1,7 +1,7 @@
 import paramiko
 
-HOST = '13.250.182.43'
-KEYS = [r'D:\文档\亚马逊\APP.pem', r'D:\文档\亚马逊\LessonFlow.pem']
+HOST = '13.229.183.21'
+KEYS = [r'D:\文档\亚马逊\126.pem', r'D:\文档\亚马逊\LessonFlow.pem']
 USERS = ['ubuntu', 'root', 'ec2-user', 'admin', 'debian']
 
 for key in KEYS:

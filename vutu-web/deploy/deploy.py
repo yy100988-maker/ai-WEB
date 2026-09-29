@@ -1,4 +1,4 @@
-"""部署 vutu-web 到生产服务器 13.250.182.43。
+"""部署 vutu-web 到生产服务器 13.229.183.21。
 
 流程：
   1. 上传 dist/ → /opt/vutu-studio/（原子切换，保留上一版做回滚）
@@ -20,8 +20,8 @@ import paramiko
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-HOST = "13.250.182.43"
-KEY = r"D:\文档\亚马逊\APP.pem"
+HOST = "13.229.183.21"
+KEY = r"D:\文档\亚马逊\126.pem"
 USER = "ubuntu"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "dist")

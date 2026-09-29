@@ -6,8 +6,8 @@
 import sys
 import paramiko
 
-HOST = '13.250.182.43'
-KEY = r'D:\文档\亚马逊\APP.pem'
+HOST = '13.229.183.21'
+KEY = r'D:\文档\亚马逊\126.pem'
 USER = 'ubuntu'
 ENV_PATH = '/opt/vutu-backend/.env'
 
