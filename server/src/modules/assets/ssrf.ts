@@ -24,6 +24,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
 import { isIP } from 'node:net';
+import ipaddr from 'ipaddr.js';
 import { Agent, request } from 'undici';
 import { childLogger } from '../../core/logger.js';
 
@@ -66,15 +67,17 @@ export class SsrfError extends Error {
  *   224.0.0.0/4      组播
  *   240.0.0.0/4      保留（含 255.255.255.255 广播）
  *
- * IPv6 禁止段：
+ * IPv6 禁止段（由 ipaddr.js 的规范化解析判定，书写形式不影响结果）：
  *   ::/128           未指定
  *   ::1/128          环回
- *   ::ffff:0:0/96    IPv4-mapped —— **必须拆出内嵌 IPv4 再判**，否则 ::ffff:127.0.0.1 会漏
+ *   ::ffff:0:0/96    IPv4-mapped —— **必须拆出内嵌 IPv4 再判**，
+ *                    否则 ::ffff:7f00:1（=127.0.0.1）会漏
  *   fc00::/7         唯一本地地址（ULA）
  *   fe80::/10        链路本地
  *   ff00::/8         组播
- *   2001:db8::/32    文档用
+ *   2001:db8::/32    文档用（reserved）
  *   64:ff9b::/96     NAT64（可映射 IPv4）
+ *   2002::/16        6to4（可内嵌任意 IPv4）
  */
 export function isBlockedIp(ip: string): boolean {
   const version = isIP(ip);
@@ -102,25 +105,59 @@ function isBlockedIpv4(ip: string): boolean {
 }
 
 function isBlockedIpv6(ip: string): boolean {
-  const lower = ip.toLowerCase().split('%')[0] ?? ''; // 去掉 zone id（fe80::1%eth0）
+  // ⚠️ 这里必须做**规范化解析**而不是前缀匹配。
+  //
+  // 历史事故（2026-09-30 修复）：旧实现用正则只识别点分十进制的
+  // ::ffff:127.0.0.1，而 IPv6 允许十六进制写法 ::ffff:7f00:1。
+  // 两者是**同一个地址**，但后者完全绕过正则 → 可直连 127.0.0.1 与
+  // 169.254.169.254（云元数据）。已用真实 safeFetch 端到端验证过该绕过。
+  //
+  // 现在改用 ipaddr.js 做规范化：先 parse 出真实的字节表示，再判定网段，
+  // 书写形式（点分/十六进制/全展开/大小写/zone id）不再影响结果。
+  let addr: ipaddr.IPv6;
+  try {
+    const parsed = ipaddr.parse(ip.split('%')[0] ?? '');
+    if (parsed.kind() !== 'ipv6') {
+      // 理论上不会走到（isBlockedIp 已分流），兜底按 IPv4 判
+      return isBlockedIpv4(parsed.toString());
+    }
+    addr = parsed as ipaddr.IPv6;
+  } catch {
+    return true; // 解析不了 → 宁可误杀
+  }
 
-  // IPv4-mapped / IPv4-compatible：必须拆出内嵌 IPv4 再判，否则 ::ffff:127.0.0.1 会漏
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(lower);
-  if (mapped?.[1]) return isBlockedIpv4(mapped[1]);
-  const compat = /^::(\d{1,3}(?:\.\d{1,3}){3})$/.exec(lower);
-  if (compat?.[1]) return isBlockedIpv4(compat[1]);
+  // IPv4-mapped（::ffff:a.b.c.d）：
+  // 必须拆出内嵌 IPv4 复用 IPv4 网段表，否则 ::ffff:7f00:1 → 127.0.0.1 会漏
+  if (addr.isIPv4MappedAddress()) {
+    return isBlockedIpv4(addr.toIPv4Address().toString());
+  }
 
-  if (lower === '::' || lower === '::1') return true; // 未指定 / 环回
-  if (lower.startsWith('fe80')) return true; // fe80::/10 链路本地
-  if (lower.startsWith('fec0')) return true; // 废弃的 site-local
-  if (/^f[cd]/.test(lower)) return true; // fc00::/7 ULA
-  if (lower.startsWith('ff')) return true; // ff00::/8 组播
-  if (lower.startsWith('2001:db8')) return true; // 文档用
-  if (lower.startsWith('64:ff9b')) return true; // NAT64
-  if (lower.startsWith('2002')) return true; // 6to4（可内嵌任意 IPv4）
+  // IPv4-compatible（::a.b.c.d，RFC 4291 已废弃，但内核仍会路由）——
+  // ⚠️ ipaddr.js v2 **不识别十六进制写法**：::7f00:1 会被误判为 'unicast' 而放行
+  // （回归测试实测）。因此这里自己按「前 96 位全 0」判定并拆出内嵌 IPv4。
+  // ::/96 本身是保留段，无论拆出的 IPv4 是什么都应拒绝，因此统一走 IPv4 网段表。
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = addr.parts as number[];
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
+    const hi = (g6 as number) >>> 8;
+    const lo = (g7 as number) >>> 8;
+    const v4 = [hi >>> 8, hi & 0xff, lo >>> 8, lo & 0xff].join('.');
+    return isBlockedIpv4(v4);
+  }
 
-  // 其它情况：展开判断高 16 位是否落在 fc00::/7 等（上面前缀判断已覆盖绝大多数写法）
-  return false;
+  switch (addr.range()) {
+    case 'unspecified': // ::
+    case 'loopback': // ::1
+    case 'linkLocal': // fe80::/10
+    case 'uniqueLocal': // fc00::/7 ULA
+    case 'multicast': // ff00::/8
+    case 'reserved': // 含 2001:db8::/32 文档段等
+    case '6to4': // 2002::/16 —— 可内嵌任意 IPv4
+    case 'rfc6052': // 64:ff9b::/96 NAT64 —— 可映射任意 IPv4
+      return true;
+    default:
+      // 只放行真正的全球单播；未知 range 一律拒绝（宁可误杀）
+      return addr.range() !== 'unicast';
+  }
 }
 
 /** 附加防御：主机名黑名单（不改 DNS 也能识别的内网别名） */

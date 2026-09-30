@@ -30,6 +30,34 @@ declare module 'fastify' {
 
 export type RouteModule = (app: FastifyInstance) => Promise<void> | void;
 
+/** userId（users.id）形态：UUID。用于限流分桶时校验 sub 的可信度 */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 从 Bearer token 里取出 userId（JWT payload 的 sub），**不验签**。
+ *
+ * 用途仅限限流分桶，不参与任何授权判断 —— 攻击者伪造 sub 只能改变自己所在的桶，
+ * 无法提权；海量伪造 token 的洪泛由 keyGenerator 的 IP 分支兜住。
+ *
+ * 为什么不能取 token 前 20 字符（auth.slice(7,27)）：那是 JWT 的**固定 header**，
+ * 所有用户相同（HS256 下恒为 eyJhbGciOiJIUzI1NiIs）→ 全体共用一个限流桶。
+ *
+ * 额外做 UUID 形态校验：非 UUID 的 sub 一律按「无法分桶」处理，退回 IP 维度，
+ * 避免攻击者用任意字符串无限造桶。
+ */
+export function extractSub(token: string): string | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const payload = parts[1];
+  if (!payload) return null;
+  try {
+    const obj = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: unknown };
+    return typeof obj.sub === 'string' && UUID_RE.test(obj.sub) ? obj.sub : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 统一成功响应 */
 export function ok<T>(req: FastifyRequest, data: T, extra?: Record<string, unknown>) {
   return { ok: true as const, data, requestId: req.requestId, ...(extra ?? {}) };
@@ -57,7 +85,14 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     // 因此这里传**同一份 pino 配置**，由 Fastify 自行构造；应用侧日志走
     // core/logger.ts 的 logger()，两边配置同源（见 buildLoggerOptions()）。
     logger: loggerOptions(),
-    trustProxy: true, // 只信 Caddy/nginx 反代（详细设计 §6.4）
+    // ⚠️ 必须是具体跳数而非 `true`。
+    // nginx 原用 $proxy_add_x_forwarded_for（**追加**客户端自带的 XFF），
+    // 配合 trustProxy:true 会让 Fastify 取最左值 = 攻击者可控 → req.ip 可伪造，
+    // 直接击穿全局限流 / 注册 IP 限流，并污染审计日志。
+    // 配套已把 nginx 改为覆写（proxy_set_header X-Forwarded-For $remote_addr），
+    // 此处只信任紧邻一跳。
+    // 用「信任跳数」字符串形式（等价于只信任紧邻一跳）
+    trustProxy: '1', // 仅信 Caddy/nginx 这一跳反代（详细设计 §6.4）
     // 生产环境不打印每请求日志（由 access log / 指标承接）。
     // 注：`logController` 在此 Fastify 版本要求实现完整接口（10+ 方法），
     // 而顶层 `disableRequestLogging` 在 fastify@6 才移除 —— 当前锁 fastify@5，
@@ -88,12 +123,15 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       timeWindow: '1 minute',
       redis: redis(),
       keyGenerator: (req) => {
+        // ⚠️ 旧实现取 token 前 20 字符（auth.slice(7,27)），但 JWT 第一段是
+        // **固定 header**（HS256 下恒为 eyJhbGciOiJIUzI1NiIs），与用户无关 →
+        // 全体登录用户共用同一个桶，实测两个不同用户的键完全相同。
+        // 现改为「IP 兜底 + userId 分桶」双维度：
+        //   - 有可解析的 sub → 按用户分桶（真正的用户维度）
+        //   - 否则（未登录 / token 畸形 / 伪造）→ 退回 IP，保证洪泛仍被限住
         const auth = req.headers.authorization;
-        if (auth?.startsWith('Bearer ')) {
-          // 以 user 维度限流（未解码，用 token 摘要避免明文进 Redis key）
-          return `u:${auth.slice(7, 27)}`;
-        }
-        return `ip:${req.ip}`;
+        const sub = auth?.startsWith('Bearer ') ? extractSub(auth.slice(7)) : null;
+        return sub ? `u:${sub}` : `ip:${req.ip}`;
       },
       errorResponseBuilder: (req, context) => {
         const locale = parseAcceptLanguage(req.headers['accept-language']);

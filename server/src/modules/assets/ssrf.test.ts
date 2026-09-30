@@ -87,10 +87,60 @@ describe('⚠️ SSRF 防护 —— 内网地址判定（PRD §8.3）', () => {
     '192.167.255.255',
     '192.169.0.1',
     '2606:4700:4700::1111',
+    '2001:4860:4860::8888',
+    '2a00:1450:4001::200e',
+    '::ffff:8.8.8.8', // IPv4-mapped 公网地址 —— 应放行
+    '::ffff:93.184.216.34',
   ];
 
   it.each(ALLOWED)('放行公网地址：%s', (ip) => {
     expect(isBlockedIp(ip)).toBe(false);
+  });
+
+  /**
+   * 回归：2026-09-30 修复的 IPv6 十六进制绕过。
+   *
+   * 旧实现用正则 /^::ffff:\d{1,3}(\.\d{1,3}){3}$/ 识别 IPv4-mapped，
+   * 只认点分十进制。而 IPv6 的十六进制写法指向同一地址却完全绕过正则：
+   *   ::ffff:7f00:1        === 127.0.0.1
+   *   ::ffff:a9fe:a9fe     === 169.254.169.254（云元数据）
+   *   ::ffff:c0a8:101      === 192.168.1.1
+   * 已用真实 safeFetch 端到端验证过该绕过（可读出内网 HTTP 响应体）。
+   * 修复方式为规范化解析（ipaddr.js），书写形式不再影响判定。
+   */
+  describe('回归：IPv4-mapped IPv6 的十六进制/其他写法不得绕过', () => {
+    it.each([
+      ['::ffff:7f00:1', '127.0.0.1'],
+      ['::ffff:a9fe:a9fe', '169.254.169.254'],
+      ['::ffff:c0a8:101', '192.168.1.1'],
+      ['::ffff:0a00:0001', '10.0.0.1'],
+      ['::ffff:ac10:1', '172.16.0.1'],
+      ['0:0:0:0:0:ffff:127.0.0.1', '全展开写法 = 127.0.0.1'],
+      ['0000:0000:0000:0000:0000:ffff:7f00:0001', '全零填充写法 = 127.0.0.1'],
+      ['::FFFF:7F00:1', '大写十六进制 = 127.0.0.1'],
+      ['::7f00:1', 'IPv4-compatible = 127.0.0.1'],
+      ['::a9fe:a9fe', 'IPv4-compatible = 169.254.169.254'],
+    ])('拦截 %s（%s）', (ip) => {
+      expect(isBlockedIp(ip)).toBe(true);
+    });
+  });
+
+  describe('回归：可内嵌 IPv4 的隧道地址段必须整体拒绝', () => {
+    it.each([
+      ['2002:7f00:1::1', '6to4，内嵌 127.0.0.1'],
+      ['2002:a9fe:a9fe::1', '6to4，内嵌 169.254.169.254'],
+      ['64:ff9b::7f00:1', 'NAT64，内嵌 127.0.0.1'],
+      ['64:ff9b::a9fe:a9fe', 'NAT64，内嵌 169.254.169.254'],
+      ['2001:db8::1', '文档保留段'],
+    ])('拦截 %s（%s）', (ip) => {
+      expect(isBlockedIp(ip)).toBe(true);
+    });
+  });
+
+  describe('回归：带 zone id / 前后空白的写法仍应被解析', () => {
+    it('拦截带 zone id 的链路本地地址', () => {
+      expect(isBlockedIp('fe80::1%eth0')).toBe(true);
+    });
   });
 
   it('非法输入一律视为禁止（宁可误杀）', () => {
@@ -163,6 +213,36 @@ describe('⚠️ SSRF 防护 —— URL 语法层（协议白名单）', () => {
     expect(() => validateUrlSyntax('http://10.1.2.3/x.png')).toThrow(SsrfError);
     expect(() => validateUrlSyntax('http://[::1]:8080/x.png')).toThrow(SsrfError);
     expect(() => validateUrlSyntax('http://[fd00::1]/x.png')).toThrow(SsrfError);
+  });
+
+  /**
+   * 回归：URL 层的十六进制 IPv4-mapped 绕过。
+   * 注意 WHATWG URL 会把多种写法**规范化**成同一个 hostname，
+   * 例如 http://[0:0:0:0:0:ffff:127.0.0.1]/ 的 hostname 就是 ::ffff:7f00:1，
+   * 因此这些用例都必须在第 ①② 层（字面量判定）就被拒绝。
+   */
+  it('拦截 URL 层的十六进制 IPv4-mapped 内网地址', () => {
+    for (const u of [
+      'http://[::ffff:7f00:1]/latest/meta-data/',
+      'http://[::ffff:7f00:1]:18098/x',
+      'http://[::ffff:a9fe:a9fe]/latest/meta-data/',
+      'http://[::ffff:c0a8:101]:8080/x',
+      'http://[0:0:0:0:0:ffff:127.0.0.1]/',
+      'http://[::FFFF:7F00:1]/',
+      'http://[::7f00:1]/',
+      'http://[2002:7f00:1::1]/',
+      'http://[64:ff9b::7f00:1]/',
+    ]) {
+      expect(() => validateUrlSyntax(u), u).toThrow(SsrfError);
+    }
+  });
+
+  it('URL 规范化后 hostname 不应泄露绕过形式', () => {
+    // 记录 WHATWG 规范化行为：这些写法最终收敛到同一 hostname
+    for (const u of ['http://[0:0:0:0:0:ffff:127.0.0.1]/', 'http://[::ffff:7f00:1]/']) {
+      const host = new URL(u).hostname.replace(/^\[|\]$/g, '');
+      expect(isBlockedIp(host), u + ' -> ' + host).toBe(true);
+    }
   });
 
   it('拦截内网主机名', () => {
