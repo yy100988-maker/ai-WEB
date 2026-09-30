@@ -1,0 +1,142 @@
+/**
+ * Vutu 设计令牌（Design Tokens）
+ * ------------------------------------------------------------------
+ * 严格对齐 V2 效果图：
+ *   - 画布底色 #F6F7F9，纯白卡片，12px 圆角，1px 细边 #E9EBEF
+ *   - 单一强调色 teal (#14B8A6)，无渐变、无毛玻璃、不堆叠阴影
+ *   - 8px 间距栅格，克制的中性灰阶
+ */
+
+:root {
+  /* ---------------- 颜色 ---------------- */
+  --v-canvas: #f6f7f9;
+  --v-surface: #ffffff;
+  --v-surface-sunken: #fafbfc;
+  --v-border: #e9ebef;
+  --v-border-strong: #dfe2e7;
+
+  --v-text: #1c2024;
+  --v-text-secondary: #5b6470;
+  --v-text-muted: #8b939e;
+  --v-text-faint: #aab1bb;
+
+  /* 强调色（唯一） */
+  --v-accent: #14b8a6;
+  --v-accent-hover: #0fa294;
+  --v-accent-active: #0d8b7f;
+  --v-accent-tint: #e6f7f5;
+  --v-accent-tint-strong: #d0f0ec;
+  --v-accent-contrast: #ffffff;
+
+  --v-danger: #e5484d;
+  --v-danger-tint: #fdecec;
+  --v-warn: #f5a524;
+  --v-warn-tint: #fef4e6;
+
+  /* ---------------- 圆角 ---------------- */
+  --v-r-xs: 6px;
+  --v-r-sm: 8px;
+  --v-r-md: 12px;
+  --v-r-lg: 16px;
+  --v-r-full: 999px;
+
+  /* ---------------- 阴影（极克制，仅浮层） ---------------- */
+  --v-shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --v-shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.03);
+  --v-shadow-float: 0 8px 24px rgba(16, 24, 40, 0.08), 0 2px 6px rgba(16, 24, 40, 0.04);
+
+  /* ---------------- 间距（8px 栅格） ---------------- */
+  --v-s1: 4px;
+  --v-s2: 8px;
+  --v-s3: 12px;
+  --v-s4: 16px;
+  --v-s5: 20px;
+  --v-s6: 24px;
+  --v-s7: 32px;
+  --v-s8: 40px;
+  --v-s9: 48px;
+
+  /* ---------------- 版面 ---------------- */
+  --v-topbar-h: 56px;
+  --v-rail-w: 272px;
+  --v-inspector-w: 304px;
+
+  /* ---------------- 字体 ---------------- */
+  --v-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --v-mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  --v-fs-xs: 11px;
+  --v-fs-sm: 12px;
+  --v-fs-md: 13px;
+  --v-fs-base: 14px;
+  --v-fs-lg: 16px;
+  --v-fs-xl: 20px;
+
+  /* ---------------- 动效 ---------------- */
+  --v-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --v-dur: 150ms;
+}
+
+/* ---------------- 重置 ---------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--v-font);
+  font-size: var(--v-fs-base);
+  color: var(--v-text);
+  background: var(--v-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--v-accent);
+  outline-offset: 2px;
+  border-radius: var(--v-r-xs);
+}
+
+/* 细滚动条（与整体克制风格一致） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d8dce2;
+  border: 3px solid transparent;
+  border-radius: var(--v-r-full);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c2c8d0;
+  background-clip: content-box;
+}

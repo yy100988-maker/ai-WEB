@@ -37,9 +37,28 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      # §13 #10 门禁：前端/后端静态代码中不得残留 mock 生成逻辑与上游内部代号
-      - name: Guard - no leaked upstream codes in catalog display names
-        run: npx vitest run tests/contract --reporter=basic || true
+      # §13 #10 门禁：前端/后端静态代码中不得残留 mock 生成逻辑与上游内部代号。
+      # 注意：必须走 vitest.contract.config.ts（npm run test:contract）。
+      # 默认配置的 include 只含 src 测试与 tests/unit，直接跑 tests/contract
+      # 会匹配 0 个测试；再叠加 '|| true' 则该门禁从未真正执行过。
+      - name: Contract tests - no leaked upstream codes
+        run: npm run test:contract
+
+      # 仓库完整性门禁：src/ 下若出现被 .gitignore 排除的文件，说明规则误伤源码，
+      # 新环境 clone 后会因模块缺失直接构建失败（历史上 *token* 曾排除 tokens.ts）。
+      - name: Guard - no source file is git-ignored
+        working-directory: .
+        run: |
+          # .bak / .bak-* / ~ 结尾是设计上就该忽略的备份文件，排除以免误报
+          IGNORED=$(git ls-files --others --ignored --exclude-standard \
+            -- 'server/src/**' 'vutu-web/src/**' 'ai-cloner/src/**' \
+            | grep -vE '[.]bak($|-)|~$' || true)
+          if [ -n "$IGNORED" ]; then
+            echo "::error::源码被 .gitignore 误排除，clone 后将无法构建："
+            echo "$IGNORED"
+            exit 1
+          fi
+          echo "ok: src 下没有被忽略的源码文件"
 
   integration:
     name: integration (real PG + Redis)
@@ -105,4 +124,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build api/worker image
+        # ⚠️ 必须回到仓库根执行：workflow 级 defaults.run.working-directory 是 server，
+        # 在此处写 ./server 会被解析成 server/server（不存在）→ 构建必然失败。
+        working-directory: .
         run: docker build -t vutu-api:ci ./server
