@@ -82,7 +82,10 @@ function ResultCard({
 }) {
   const busy = task.status === 'queued' || task.status === 'running';
   const failed = task.status === 'failed' || task.status === 'timeout';
-  const image = task.results?.[0];
+  // ⚠️ results 存在 ≠ 有可显示的图片：详情接口的 results 不带 url，
+  // 必须 hydrateTask 签发 viewUrl 后才有。分开判断，否则会渲染 <img src={undefined}> 破图。
+  const result = task.results?.[0];
+  const image = result?.url ? result : undefined;
 
   return (
     <article className={`rcard ${busy ? 'rcard--busy' : ''} ${failed ? 'rcard--failed' : ''}`}>
@@ -185,7 +188,7 @@ function ResultCard({
           </div>
 
           <div className="rcard__stamp">
-            {image && (
+            {image?.url && (
               <a className="ghost-btn ghost-btn--icon" href={image.url} download title="下载">
                 <IconDownload size={15} />
               </a>

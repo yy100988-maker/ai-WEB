@@ -13,6 +13,7 @@ import {
   api,
   ApiError,
   clearSession,
+  hydrateTask,
   isLoggedIn,
   matchPrice,
   newIdempotencyKey,
@@ -194,8 +195,10 @@ export default function App() {
               idempotencyKey: newIdempotencyKey(),
               batchId,
             });
+            // ⚠️ 回退分支必须是 x 而不是 task：
+            // 写 task 会把列表里**其余所有行**（含全部历史任务）都替换成这条任务。
             setTasks((prev) =>
-              prev.map((x) => (x.id === tempId ? { ...task, prompt: cfg.prompt } : task)),
+              prev.map((x) => (x.id === tempId ? { ...task, prompt: cfg.prompt } : x)),
             );
             ok += 1;
           } catch {
@@ -333,7 +336,32 @@ export default function App() {
     (async () => {
       try {
         const page = await api.tasks({ type: 'image', limit: 20 });
-        if (!cancelled) setTasks(page.items);
+        if (cancelled) return;
+        setTasks(page.items);
+
+        // 列表接口不返回 results（后端 serializeTaskListRow 无该字段），
+        // 因此**终态任务**既不会被下面的 SSE effect 建流，也就没有人 hydrate，
+        // 结果是刷新后所有历史任务永久显示灰骨架。
+        // 这里补一次 hydrate（拉详情 + 签发 viewUrl），仅对终态且缺 results 的行。
+        const TERMINAL: TaskStatus[] = ['succeeded', 'failed', 'cancelled', 'timeout'];
+        const needHydrate = page.items.filter(
+          (t) => TERMINAL.includes(t.status) && !(t.results && t.results.length > 0),
+        );
+        if (needHydrate.length === 0) return;
+
+        const hydrated = await Promise.all(
+          needHydrate.map(async (t) => {
+            try {
+              return await hydrateTask(t.id);
+            } catch {
+              return null;
+            }
+          }),
+        );
+        if (cancelled) return;
+        const byId = new Map(hydrated.filter(Boolean).map((t) => [t!.id, t!]));
+        if (byId.size === 0) return;
+        setTasks((prev) => prev.map((x) => byId.get(x.id) ?? x));
       } catch {
         if (!cancelled) setTasks(DEMO_TASKS);
       }
@@ -355,7 +383,7 @@ export default function App() {
 
       const stop = streamTask(t.id, (event, data) => {
         if (event === 'error') {
-          // SSE 连不上（含 EventSource 无鉴权头导致的 401）→ 回落一次详情查询，转存未完成则继续轮询
+          // SSE 断线 → 回落详情查询（hydrateTask 会一并签发结果图 viewUrl）
           void (async () => {
             try {
               const detail = await api.task(t.id);
@@ -677,7 +705,9 @@ async function waitForTaskResults(taskId: string): Promise<TaskSummary> {
     try {
       const detail = await api.task(taskId);
       last = detail;
-      if (detail.results && detail.results.length > 0) return detail;
+      // 拿到结果后必须经 hydrateTask 补签 viewUrl：详情接口的 results 不含 url，
+      // 直接返回会让 ResultFeed 渲染 <img src={undefined}> 破图。
+      if (detail.results && detail.results.length > 0) return hydrateTask(taskId);
       if (detail.status === 'failed' || detail.status === 'cancelled' || detail.status === 'timeout') {
         return detail;
       }

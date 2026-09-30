@@ -321,7 +321,18 @@ export interface TaskSummary {
 
 export interface TaskResultAsset {
   assetId: string;
-  url: string;
+  /**
+   * 结果图的可访问地址。
+   *
+   * ⚠️ 可选：后端 `GET /v1/tasks/:id`（详情）返回的 results **不含 url**，
+   * 只有 SSE 终态事件才带。而 `GET /v1/tasks`（列表）连 results 都没有。
+   * 因此从详情/列表 hydrate 出来的结果必须再调 `api.asset(assetId)` 签发
+   * viewUrl 才能显示图片。此前把 url 声明成必填，直接用 <img src={url}> 渲染，
+   * 等于用类型系统掩盖了契约缺口 → 刷新后历史任务永久显示灰骨架。
+   *
+   * 已有 url 时不要重复签发（15min 时效 + 请求开销）。
+   */
+  url?: string;
   mimeType: string;
   width?: number;
   height?: number;
@@ -347,6 +358,37 @@ export interface AssetItem {
   sizeBytes: number;
   createdAt: string;
   viewUrl?: string;
+}
+
+/**
+ * 补齐一条任务的详情与结果图地址。
+ *
+ * 背景：列表接口（GET /v1/tasks）不返回 results，详情接口（GET /v1/tasks/:id）
+ * 返回 results 但**不含 url** —— url 只出现在 SSE 终态事件里。于是：
+ *   - 刷新页面后，历史任务没有 results → 永久灰骨架；
+ *   - 即使拿到 results，没有 url 也渲染不出图片。
+ *
+ * 这里做两件事：拉详情 → 按 assetId 调 GET /v1/assets/:id 签发 viewUrl。
+ * 已有 url 的结果不重复签发（15min 时效，重复请求无收益）。
+ */
+export async function hydrateTask(taskId: string): Promise<TaskSummary> {
+  const detail = await request<TaskSummary>(`/v1/tasks/${encodeURIComponent(taskId)}`);
+  const results = detail.results ?? [];
+
+  const signed = await Promise.all(
+    results.map(async (r) => {
+      if (r.url || !r.assetId) return r;
+      try {
+        const { viewUrl } = await api.asset(r.assetId);
+        return { ...r, url: viewUrl };
+      } catch {
+        // 签发失败不阻塞整条任务（资产可能已删除或无权），保持无 url → 显示骨架
+        return r;
+      }
+    }),
+  );
+
+  return { ...detail, results: signed };
 }
 
 // ------------------------------------------------------------------ 接口
@@ -659,30 +701,74 @@ export async function uploadImageFile(file: File): Promise<{ assetId: string }> 
  * 订阅任务 SSE 进度流。
  * 契约：GET /v1/tasks/:id/stream → event: progress | succeeded | failed | ...
  * 返回取消函数。
+ *
+ * ⚠️ 这里**不能**用 EventSource：它无法携带 Authorization 头，
+ * 而服务端只认 Bearer → 连接必 401，任务进度会永久冻结在 0%。
+ * 改为 fetch + ReadableStream 手写 SSE 帧解析（同 ai-cloner 的实现）。
  */
 export function streamTask(
   taskId: string,
   onEvent: (event: string, data: unknown) => void,
 ): () => void {
   const url = `${BASE}/v1/tasks/${encodeURIComponent(taskId)}/stream`;
-  const es = new EventSource(url);
+  const controller = new AbortController();
+  let stopped = false;
 
-  const handle = (name: string) => (ev: MessageEvent<string>) => {
-    let parsed: unknown = ev.data;
+  const dispatch = (event: string, rawData: string): void => {
+    let parsed: unknown = rawData;
     try {
-      parsed = JSON.parse(ev.data);
+      parsed = JSON.parse(rawData);
     } catch {
       /* 保留原始字符串 */
     }
-    onEvent(name, parsed);
+    onEvent(event, parsed);
   };
 
-  es.addEventListener('progress', handle('progress'));
-  es.addEventListener('succeeded', handle('succeeded'));
-  es.addEventListener('failed', handle('failed'));
-  es.addEventListener('cancelled', handle('cancelled'));
-  es.addEventListener('timeout', handle('timeout'));
-  es.onerror = () => onEvent('error', null);
+  void (async () => {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          accept: 'text/event-stream',
+          ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+        },
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        onEvent('error', null);
+        return;
+      }
 
-  return () => es.close();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          if (!frame.trim() || frame.startsWith(':')) continue; // 注释帧（心跳）
+          let event = 'message';
+          const dataLines: string[] = [];
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+          }
+          dispatch(event, dataLines.join('\n'));
+          if (stopped) return;
+        }
+      }
+      // 服务端关闭流（终态时后端会 end()）→ 按断线处理，由调用方决定是否重连
+      if (!stopped) onEvent('error', null);
+    } catch {
+      if (!stopped) onEvent('error', null);
+    }
+  })();
+
+  return () => {
+    stopped = true;
+    controller.abort();
+  };
 }
