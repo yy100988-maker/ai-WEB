@@ -1,0 +1,45 @@
+name: CI (vutu-web)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# vutu-web 是 /studio/ 的生图工作台 SPA，此前完全没有 CI ——
+# 2026-09-30 审查发现它的 4 个缺陷（含批量 map 笔误这类数据破坏级问题）
+# 全靠人工发现。现引入 Vitest + Testing Library 并接入 CI。
+jobs:
+  vutu-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: vutu-web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: vutu-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      # 测试与类型检查同源（tsconfig include src，测试文件也被检查），
+      # 因此不允许出现「测试能过但类型有错」的状态。
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

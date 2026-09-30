@@ -1,3 +1,4 @@
+/// <reference types='vitest' />
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -9,6 +10,10 @@ import react from '@vitejs/plugin-react';
  *   这两个值由 VITE_BASE / VITE_API_BASE 注入，见 .env.production。
  *
  * 开发：`/v1` 代理到本地 vutu-server，避免 CORS。
+ *
+ * 测试：jsdom 环境跑组件测试（React 18 + Testing Library）。
+ *   统一放本文件而非独立 vitest.config.ts —— 共用同一套 alias 与插件，
+ *   避免两处配置漂移导致「测试能过、构建失败」这类假绿。
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -26,6 +31,26 @@ export default defineConfig(({ mode }) => {
           target: env['VUTU_API_TARGET'] ?? 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
+      },
+    },
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: ['./src/test/setup.ts'],
+      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      // 业务不 import CSS，但 setup/组件可能间接引入；关掉可加速
+      css: false,
+      restoreMocks: true,
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'html'],
+        include: ['src/**/*.{ts,tsx}'],
+        exclude: [
+          'src/**/*.test.{ts,tsx}',
+          'src/test/**',
+          'src/main.tsx',
+          'src/vite-env.d.ts',
+        ],
       },
     },
   };

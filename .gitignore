@@ -3,6 +3,7 @@ node_modules/
 dist/
 .next/
 out/
+coverage/
 *.tsbuildinfo
 
 # 本地调试脚本与审计产物（不进仓库）
