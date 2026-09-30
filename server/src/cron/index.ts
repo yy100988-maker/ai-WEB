@@ -102,31 +102,53 @@ export function startCron(): { stop: () => void } {
 }
 
 /**
- * 超时扫描（详细设计 §5）：running 超 30min → timeout → refund。
- * 兜底轮询器漏网的任务（如 poll job 丢失）。
+ * 超时扫描（详细设计 §5）：超 30min 未终态 → timeout → refund。
+ * 兜底两类漏网任务：
+ *   1. running —— 轮询器/poll job 丢失；
+ *   2. queued  —— 入队失败或队列丢 job。
+ *
+ * ⚠️ 历史缺陷（2026-09-30 修复）：本扫描原先只查 status='running'，
+ * 而 tasks/service.ts 在「扣费+建任务」事务**提交之后**才调用 enqueueGeneration。
+ * 若入队抛错（Redis 抖动等），任务永久停在 queued —— 不进终态、不退款、
+ * 并发占位也不释放，而 queued 压根不在本扫描范围内 → 用户的钱被无限期扣住，
+ * 只能手动取消才能拿回。
+ *
+ * queued 与 running 的时间基准不同：running 看 startedAt（入队即置），
+ * queued 尚无 startedAt，只能看 createdAt。
  */
+/** 兜底提示语：区分「从未入队」与「生成超时」，便于运营定位是哪一类漏网 */
+const TIMEOUT_MSG_QUEUED = 'task was never enqueued (enqueue failed or job lost)';
+const TIMEOUT_MSG_RUNNING = 'generation timed out';
+
 export async function scanTimeouts(now: Date = new Date()): Promise<number> {
   const cfg = getConfig();
   const deadline = new Date(now.getTime() - cfg.TASK_TIMEOUT_MIN * 60_000);
 
   const stale = await db().task.findMany({
     where: {
-      status: 'running',
+      status: { in: ['queued', 'running'] },
       OR: [
-        { startedAt: { lt: deadline } },
-        { startedAt: null, createdAt: { lt: deadline } },
+        // running：入队即有 startedAt
+        { status: 'running', startedAt: { lt: deadline } },
+        // queued：尚无 startedAt，以创建时间为准
+        { status: 'queued', startedAt: null, createdAt: { lt: deadline } },
       ],
     },
-    select: { id: true, publicId: true },
+    select: { id: true, publicId: true, status: true },
     take: 200,
   });
 
   for (const t of stale) {
+    const neverQueued = t.status === 'queued';
     await refundTaskTerminal({
       taskId: t.id,
       taskPublicId: t.publicId,
       toStatus: 'timeout',
-      error: { code: 'TASK_TIMEOUT', message: 'generation timed out', retryable: true },
+      error: {
+        code: 'TASK_TIMEOUT',
+        message: neverQueued ? TIMEOUT_MSG_QUEUED : TIMEOUT_MSG_RUNNING,
+        retryable: true,
+      },
       message: 'timeout scan',
     });
   }

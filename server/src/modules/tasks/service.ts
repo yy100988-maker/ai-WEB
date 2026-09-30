@@ -25,6 +25,9 @@ import { enqueueGeneration } from './queue.js';
 import { publishTaskEvent, cacheTaskState } from './events.js';
 import { cancellable } from './state-machine.js';
 import { notifyTaskFailed } from '../notifications/service.js';
+import { childLogger } from '../../core/logger.js';
+
+const log = childLogger({ mod: 'tasks' });
 
 export interface CreateTaskInput {
   userId: string;
@@ -277,10 +280,45 @@ export const taskService = {
       });
 
       // ---- 8. 入队 ----
-      await enqueueGeneration(
-        { taskId, taskPublicId, userId: input.userId },
-        input.idempotencyKey,
-      );
+      //
+      // ⚠️ 注意此处**在扣费事务提交之后**：若入队失败（Redis 不可达等），
+      // 钱已扣、任务行已落库但永远不会被 worker 消费。下面的 catch 做了补偿：
+      // 把任务推进终态并全额退款，避免用户的钱被无限期扣住。
+      //
+      // 两道防线：
+      //   ① 即时补偿（本处）——用户秒级拿回积分，状态立刻可见；
+      //   ② 兜底扫描（cron scanTimeouts）——覆盖「入队成功但 job 丢失」的情形。
+      try {
+        await enqueueGeneration(
+          { taskId, taskPublicId, userId: input.userId },
+          input.idempotencyKey,
+        );
+      } catch (enqueueErr) {
+        log.error(
+          { err: enqueueErr, taskId, taskPublicId },
+          'enqueue failed: refunding and marking task failed',
+        );
+        // 与 tasks 无循环依赖的 settle 走动态 import（见 cancel 的同款做法）
+        const { refundTaskTerminal } = await import('../../workers/settle.js');
+        await refundTaskTerminal({
+          taskId,
+          taskPublicId,
+          toStatus: 'failed',
+          error: {
+            code: 'ENQUEUE_FAILED',
+            message: 'failed to queue task, credits refunded',
+            retryable: true,
+          },
+        }).catch((refundErr: unknown) => {
+          // 补偿本身失败：任务会留在 queued，交给 cron scanTimeouts 兜底
+          log.error(
+            { err: refundErr, taskId, taskPublicId },
+            'refund after enqueue failure failed; cron timeout scan will retry',
+          );
+        });
+        // 并发占位已由 refundTaskTerminal → settle 释放
+        throw enqueueErr;
+      }
 
       const estimatedSec = estimateSeconds(picked.modelCode);
 
