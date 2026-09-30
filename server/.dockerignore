@@ -1,0 +1,29 @@
+# 构建上下文是 server/（见 docker-compose.yml build.context）。
+# ⚠️ 本文件缺失会导致部署机上的真实 .env（JWT_SECRET / PG_PASSWORD / LK_API_KEYS）、
+# node_modules/、dist/、backup/ 全部进入 build context 与 BuildKit 缓存 ——
+# 即使没有被 COPY 进镜像层，也会留在 daemon 侧缓存与会话日志里。
+
+# 密钥与本地环境
+.env
+.env.*
+!.env.example
+*.pem
+
+# 依赖与构建产物（本 Dockerfile 内会自行 npm ci / build，无需来自上下文）
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 数据与备份
+backup/
+*.tar.gz
+
+# 注意：**不要**忽略 tests/ —— Dockerfile 的 test 阶段需要 COPY tests ./tests
+# （docker-compose.yml 的 test 服务 build.target=test）。
+
+# 日志与临时文件
+*.log
+*.bak
+*~
+.DS_Store
+Thumbs.db

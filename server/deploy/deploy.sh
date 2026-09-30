@@ -56,7 +56,11 @@ for i in $(seq 1 30); do
   fi
   sleep 2
   if [ "$i" -eq 30 ]; then
-    echo "WARN: api 健康检查未通过，请查看日志：docker compose logs api" >&2
+    # ⚠️ 原先这里只 echo WARN 就继续，脚本仍以 0 退出 —— 部署"成功"但服务不可用，
+    # 调用方无从察觉。健康检查失败必须让部署失败，否则告警永远收不到。
+    echo "ERROR: api 健康检查未通过（30 次重试 x 2s），部署失败" >&2
+    echo "请查看日志：docker compose logs api" >&2
+    exit 1
   fi
 done
 

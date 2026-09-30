@@ -1,0 +1,44 @@
+name: CI (ai-cloner)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# ⚠️ 说明：GitHub Actions 只执行**仓库根** .github/workflows/ 下的 workflow。
+# 本文件原先放在 ai-cloner/.github/workflows/ 且触发分支写 master，
+# 而仓库早已统一为单 main → 该 workflow 从未被执行过（前端实际零 CI）。
+# 现迁到根目录并改为主分支触发；ai-cloner 是子目录而非子模块，故需在此声明。
+jobs:
+  ai-cloner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ai-cloner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ai-cloner/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
